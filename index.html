@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rockwell Second Brain</title>
+  <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.jsdelivr.net/npm/timeago.js@4.0.0-beta.3/dist/timeago.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0a;
+      color: #e5e7eb;
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    /* Layout */
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+      width: 100%;
+    }
+
+    .header {
+      border-bottom: 1px solid #1f2937;
+      padding: 24px;
+      background: linear-gradient(135deg, #0a0a0a 0%, #111827 100%);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .header-title {
+      font-family: 'Clash Display', sans-serif;
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      background: linear-gradient(135deg, #fff 0%, #d1d5db 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header-controls {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .auth-status {
+      font-size: 12px;
+      color: #9ca3af;
+      padding: 8px 12px;
+      background: #111827;
+      border-radius: 4px;
+      border: 1px solid #1f2937;
+    }
+
+    .auth-status.authed {
+      color: #22c55e;
+      border-color: #22c55e;
+      background: rgba(34, 197, 94, 0.1);
+    }
+
+    .content-area {
+      display: grid;
+      grid-template-columns: 1fr 240px;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .main {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .filters-bar {
+      padding: 20px 24px;
+      border-bottom: 1px solid #1f2937;
+      background: #0f1419;
+    }
+
+    .filter-group {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .category-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      padding: 6px 12px;
+      border-radius: 4px;
+      border: 1px solid transparent;
+      background: #1f2937;
+      color: #9ca3af;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .tab:hover {
+      background: #2d3748;
+      color: #e5e7eb;
+    }
+
+    .tab.active {
+      color: #fff;
+      border-color: #3b82f6;
+      background: rgba(59, 130, 246, 0.15);
+    }
+
+    .tab.active[data-category="contact"] {
+      border-color: #22c55e;
+      background: rgba(34, 197, 94, 0.15);
+    }
+
+    .tab.active[data-category="lesson"] {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.15);
+    }
+
+    .tab.active[data-category="open_thread"] {
+      border-color: #ef4444;
+      background: rgba(239, 68, 68, 0.15);
+    }
+
+    .tab.active[data-category="vendor"] {
+      border-color: #a855f7;
+      background: rgba(168, 85, 247, 0.15);
+    }
+
+    .tab.active[data-category="client"] {
+      border-color: #06b6d4;
+      background: rgba(6, 182, 212, 0.15);
+    }
+
+    .tab.active[data-category="strategy"] {
+      border-color: #6366f1;
+      background: rgba(99, 102, 241, 0.15);
+    }
+
+    .tab.active[data-category="daily_note"] {
+      border-color: #6b7280;
+      background: rgba(107, 114, 128, 0.15);
+    }
+
+    .filter-divider {
+      width: 1px;
+      height: 24px;
+      background: #1f2937;
+    }
+
+    .importance-filter {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .importance-filter label {
+      font-size: 13px;
+      color: #9ca3af;
+    }
+
+    .importance-select {
+      padding: 6px 10px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      color: #e5e7eb;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .importance-select:hover {
+      border-color: #4b5563;
+      background: #2d3748;
+    }
+
+    .search-container {
+      padding: 20px 24px;
+      border-bottom: 1px solid #1f2937;
+      display: flex;
+      gap: 12px;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 10px 12px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      color: #e5e7eb;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      background: #111827;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+    }
+
+    .search-input::placeholder {
+      color: #6b7280;
+    }
+
+    .search-semantic {
+      padding: 10px 12px;
+      background: #3b82f6;
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .search-semantic:hover {
+      background: #2563eb;
+    }
+
+    .search-semantic:active {
+      transform: scale(0.98);
+    }
+
+    .search-semantic.loading {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .grid-container {
+      flex: 1;
+      overflow: auto;
+      padding: 24px;
+      background: #0a0a0a;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+
+    .card {
+      background: #141414;
+      border: 1px solid #1f2937;
+      border-radius: 6px;
+      overflow: hidden;
+      border-left: 4px solid #3b82f6;
+      transition: all 0.2s;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      max-height: 240px;
+    }
+
+    .card:hover {
+      border-color: #2d3748;
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .card[data-category="contact"] {
+      border-left-color: #22c55e;
+    }
+
+    .card[data-category="lesson"] {
+      border-left-color: #f59e0b;
+    }
+
+    .card[data-category="open_thread"] {
+      border-left-color: #ef4444;
+    }
+
+    .card[data-category="vendor"] {
+      border-left-color: #a855f7;
+    }
+
+    .card[data-category="client"] {
+      border-left-color: #06b6d4;
+    }
+
+    .card[data-category="strategy"] {
+      border-left-color: #6366f1;
+    }
+
+    .card[data-category="daily_note"] {
+      border-left-color: #6b7280;
+    }
+
+    .card-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid #1f2937;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 8px;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      flex: 1;
+      line-height: 1.4;
+    }
+
+    .card-importance {
+      color: #f59e0b;
+      font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .card-body {
+      padding: 12px 14px;
+      flex: 1;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .card-content {
+      font-size: 13px;
+      color: #d1d5db;
+      line-height: 1.5;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      flex: 1;
+    }
+
+    .card-meta {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #1f2937;
+      font-size: 11px;
+      color: #6b7280;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .card-category {
+      background: #1f2937;
+      padding: 2px 6px;
+      border-radius: 2px;
+      font-size: 11px;
+      text-transform: capitalize;
+      color: #9ca3af;
+    }
+
+    .card-time {
+      color: #6b7280;
+    }
+
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      color: #6b7280;
+    }
+
+    .empty-state-icon {
+      font-size: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    .empty-state-text {
+      font-size: 14px;
+    }
+
+    .sidebar {
+      border-left: 1px solid #1f2937;
+      background: #0f1419;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      overflow: auto;
+    }
+
+    .sidebar-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6b7280;
+    }
+
+    .new-entry-btn {
+      padding: 12px;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+    }
+
+    .new-entry-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+    }
+
+    .new-entry-btn:active {
+      transform: scale(0.98);
+    }
+
+    .stats {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      color: #9ca3af;
+      padding: 6px 0;
+      border-bottom: 1px solid #1f2937;
+    }
+
+    .stat-value {
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    /* Modal & Overlay */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .modal-overlay.show {
+      display: flex;
+      opacity: 1;
+    }
+
+    .modal {
+      background: #141414;
+      border: 1px solid #1f2937;
+      border-radius: 6px;
+      padding: 24px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow: auto;
+      animation: slideUp 0.3s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(20px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 16px;
+      border-bottom: 1px solid #1f2937;
+    }
+
+    .modal-title {
+      font-family: 'Clash Display', sans-serif;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 24px;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+
+    .modal-close:hover {
+      color: #e5e7eb;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+
+    .form-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: #d1d5db;
+      text-transform: capitalize;
+    }
+
+    .form-input,
+    .form-textarea,
+    .form-select {
+      padding: 10px 12px;
+      background: #1f2937;
+      border: 1px solid #374151;
+      border-radius: 4px;
+      color: #e5e7eb;
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      transition: all 0.2s;
+    }
+
+    .form-input:focus,
+    .form-textarea:focus,
+    .form-select:focus {
+      outline: none;
+      border-color: #3b82f6;
+      background: #111827;
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+    }
+
+    .form-textarea {
+      resize: vertical;
+      min-height: 120px;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .form-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid #1f2937;
+    }
+
+    .btn-submit,
+    .btn-cancel {
+      flex: 1;
+      padding: 12px;
+      border-radius: 4px;
+      border: none;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .btn-submit {
+      background: #3b82f6;
+      color: #fff;
+    }
+
+    .btn-submit:hover:not(:disabled) {
+      background: #2563eb;
+    }
+
+    .btn-submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-cancel {
+      background: #1f2937;
+      color: #e5e7eb;
+    }
+
+    .btn-cancel:hover {
+      background: #2d3748;
+    }
+
+    .sidebar-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 360px;
+      height: 100vh;
+      background: #141414;
+      border-left: 1px solid #1f2937;
+      z-index: 999;
+      transform: translateX(100%);
+      transition: transform 0.3s ease-out;
+      display: flex;
+      flex-direction: column;
+      overflow: auto;
+    }
+
+    .sidebar-panel.show {
+      transform: translateX(0);
+    }
+
+    .panel-header {
+      padding: 20px;
+      border-bottom: 1px solid #1f2937;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .panel-close {
+      background: none;
+      border: none;
+      color: #9ca3af;
+      font-size: 24px;
+      cursor: pointer;
+    }
+
+    .panel-close:hover {
+      color: #e5e7eb;
+    }
+
+    .panel-content {
+      padding: 20px;
+      flex: 1;
+      overflow: auto;
+    }
+
+    .error-message {
+      padding: 12px;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid #ef4444;
+      border-radius: 4px;
+      color: #fca5a5;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .success-message {
+      padding: 12px;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid #22c55e;
+      border-radius: 4px;
+      color: #86efac;
+      font-size: 13px;
+      margin-bottom: 16px;
+    }
+
+    .loading {
+      display: inline-block;
+      width: 4px;
+      height: 4px;
+      background: currentColor;
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.6; }
+      50% { opacity: 1; }
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #374151;
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #4b5563;
+    }
+
+    /* Responsive */
+    @media (max-width: 1200px) {
+      .content-area {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .header {
+        padding: 16px;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .header-title {
+        font-size: 24px;
+      }
+
+      .card-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .modal {
+        max-width: 90%;
+      }
+
+      .sidebar-panel {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="header-title">Rockwell Second Brain</div>
+      <div class="header-controls">
+        <div class="auth-status" id="authStatus">Not authenticated</div>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="main">
+        <div class="filters-bar">
+          <div class="filter-group">
+            <div class="category-tabs" id="categoryTabs">
+              <button class="tab active" data-category="all">All</button>
+              <button class="tab" data-category="decision">Decision</button>
+              <button class="tab" data-category="contact">Contact</button>
+              <button class="tab" data-category="lesson">Lesson</button>
+              <button class="tab" data-category="open_thread">Open Thread</button>
+              <button class="tab" data-category="vendor">Vendor</button>
+              <button class="tab" data-category="client">Client</button>
+              <button class="tab" data-category="strategy">Strategy</button>
+              <button class="tab" data-category="daily_note">Daily Note</button>
+            </div>
+            <div class="filter-divider"></div>
+            <div class="importance-filter">
+              <label>Min Importance:</label>
+              <select id="importanceFilter" class="importance-select">
+                <option value="0">All</option>
+                <option value="1">1+</option>
+                <option value="2">2+</option>
+                <option value="3">3+</option>
+                <option value="4">4+</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="search-container">
+          <input
+            type="text"
+            id="keywordSearch"
+            class="search-input"
+            placeholder="Keyword search (real-time)..."
+          >
+          <button id="semanticSearchBtn" class="search-semantic">Semantic</button>
+        </div>
+
+        <div class="grid-container">
+          <div class="card-grid" id="cardGrid">
+            <div class="empty-state">
+              <div class="empty-state-icon">◈</div>
+              <div class="empty-state-text">Loading knowledge base...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <div class="sidebar-title">Quick Actions</div>
+        <button class="new-entry-btn" id="newEntryBtn">+ New Entry</button>
+
+        <div class="sidebar-title">Statistics</div>
+        <div class="stats" id="stats">
+          <div class="stat">
+            <span>Total entries</span>
+            <span class="stat-value" id="totalCount">—</span>
+          </div>
+          <div class="stat">
+            <span>With embeddings</span>
+            <span class="stat-value" id="embeddedCount">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card Detail Modal -->
+  <div class="modal-overlay" id="cardModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 class="modal-title" id="modalTitle">Entry Details</h2>
+        <button class="modal-close" id="modalClose">&times;</button>
+      </div>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+  <!-- New Entry Sidebar Panel -->
+  <div class="sidebar-panel" id="newEntryPanel">
+    <div class="panel-header">
+      <h3 style="font-family: 'Clash Display', sans-serif; font-size: 18px;">New Entry</h3>
+      <button class="panel-close" id="panelClose">&times;</button>
+    </div>
+    <div class="panel-content">
+      <form id="newEntryForm">
+        <div id="formMessage"></div>
+
+        <div class="form-group">
+          <label class="form-label">Title *</label>
+          <input type="text" name="title" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Content *</label>
+          <textarea name="content" class="form-textarea" required></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select name="category" class="form-select" required>
+              <option value="">Select category</option>
+              <option value="decision">Decision</option>
+              <option value="contact">Contact</option>
+              <option value="lesson">Lesson</option>
+              <option value="open_thread">Open Thread</option>
+              <option value="vendor">Vendor</option>
+              <option value="client">Client</option>
+              <option value="strategy">Strategy</option>
+              <option value="daily_note">Daily Note</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Importance</label>
+            <select name="importance" class="form-select">
+              <option value="3">3 (Default)</option>
+              <option value="1">1 (Low)</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="5">5 (Critical)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tags (comma-separated)</label>
+          <input type="text" name="tags" class="form-input" placeholder="tag1, tag2, tag3">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Source</label>
+          <input type="text" name="source" class="form-input" placeholder="Optional: where this came from">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Dashboard Secret *</label>
+          <input type="password" name="secret" class="form-input" placeholder="Enter DASHBOARD_SECRET" required>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-submit">Create Entry</button>
+          <button type="button" class="btn-cancel" id="panelCancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // ===== Configuration =====
+    const SUPABASE_URL = 'https://kihzwozrqcoqjkwvoxjg.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHp3b3pycWNvcWprd294emciLCJyb2xlIjoiYW5vbiIsImlhdCI6MTY3NDI4OTU0OCwiZXhwIjoxOTkwNDI5OTQ4fQ.h7cAXsqCIWRqXLaKVJPg1vB0P4K9q0P4K9q0P4K9q0';
+    const ADD_ENTRY_FUNCTION_URL = 'https://kihzwozrqcoqjkwvoxjg.supabase.co/functions/v1/add-entry';
+
+    const categoryColors = {
+      decision: '#3b82f6',
+      contact: '#22c55e',
+      lesson: '#f59e0b',
+      open_thread: '#ef4444',
+      vendor: '#a855f7',
+      client: '#06b6d4',
+      strategy: '#6366f1',
+      daily_note: '#6b7280'
+    };
+
+    const categoryLabels = {
+      decision: 'Decision',
+      contact: 'Contact',
+      lesson: 'Lesson',
+      open_thread: 'Open Thread',
+      vendor: 'Vendor',
+      client: 'Client',
+      strategy: 'Strategy',
+      daily_note: 'Daily Note'
+    };
+
+    // ===== State =====
+    let supabase = null;
+    let allEntries = [];
+    let filteredEntries = [];
+    let currentFilter = { category: 'all', importance: 0 };
+    let currentKeywordSearch = '';
+    let isSemanticSearch = false;
+    let dashboardSecret = localStorage.getItem('dashboardSecret') || '';
+
+    // ===== Initialize Supabase =====
+    async function initSupabase() {
+      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      updateAuthStatus();
+      loadEntries();
+    }
+
+    function updateAuthStatus() {
+      const status = document.getElementById('authStatus');
+      if (supabase) {
+        status.textContent = 'Connected';
+        status.classList.add('authed');
+      }
+    }
+
+    // ===== Load Entries =====
+    async function loadEntries() {
+      try {
+        const { data, error } = await supabase
+          .from('knowledge_entries')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        allEntries = data || [];
+        updateStats();
+        applyFilters();
+      } catch (err) {
+        console.error('Failed to load entries:', err);
+        showEmptyState('Failed to load knowledge base');
+      }
+    }
+
+    // ===== Filtering & Search =====
+    function applyFilters() {
+      let filtered = [...allEntries];
+
+      // Category filter
+      if (currentFilter.category !== 'all') {
+        filtered = filtered.filter(e => e.category === currentFilter.category);
+      }
+
+      // Importance filter
+      if (currentFilter.importance > 0) {
+        filtered = filtered.filter(e => e.importance >= currentFilter.importance);
+      }
+
+      // Keyword search
+      if (currentKeywordSearch.trim()) {
+        const q = currentKeywordSearch.toLowerCase();
+        filtered = filtered.filter(e =>
+          e.title.toLowerCase().includes(q) ||
+          e.content.toLowerCase().includes(q) ||
+          (e.tags && e.tags.some(t => t.toLowerCase().includes(q)))
+        );
+      }
+
+      filteredEntries = filtered;
+      renderGrid();
+    }
+
+    async function semanticSearch() {
+      const query = document.getElementById('keywordSearch').value.trim();
+      if (!query) {
+        showMessage('Please enter a search query', 'error', 'keywordSearch');
+        return;
+      }
+
+      const btn = document.getElementById('semanticSearchBtn');
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      try {
+        // Call search_knowledge RPC
+        const { data, error } = await supabase.rpc('search_knowledge', {
+          query_text: query,
+          query_embedding: null, // Frontend doesn't generate embeddings
+          match_count: 20
+        });
+
+        if (error) throw error;
+
+        filteredEntries = data || [];
+        isSemanticSearch = true;
+        renderGrid();
+      } catch (err) {
+        console.error('Semantic search failed:', err);
+        showMessage('Semantic search unavailable (embeddings may still be processing)', 'error', 'cardGrid');
+      } finally {
+        btn.classList.remove('loading');
+        btn.disabled = false;
+      }
+    }
+
+    // ===== Rendering =====
+    function renderGrid() {
+      const grid = document.getElementById('cardGrid');
+
+      if (filteredEntries.length === 0) {
+        showEmptyState('No entries found');
+        return;
+      }
+
+      grid.innerHTML = filteredEntries.map(entry => `
+        <div class="card" data-category="${entry.category}" data-id="${entry.id}">
+          <div class="card-header">
+            <div class="card-title">${escapeHtml(entry.title)}</div>
+            <div class="card-importance">${'★'.repeat(entry.importance)}</div>
+          </div>
+          <div class="card-body">
+            <div class="card-content">${escapeHtml(entry.content)}</div>
+            <div class="card-meta">
+              <span class="card-category">${categoryLabels[entry.category]}</span>
+              <span class="card-time" data-time="${entry.created_at}">${formatTime(entry.created_at)}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      // Attach click handlers
+      grid.querySelectorAll('.card').forEach(card => {
+        card.addEventListener('click', () => showCardDetail(card.dataset.id));
+      });
+
+      // Update timeago
+      if (window.timeago) {
+        window.timeago.render(grid.querySelectorAll('.card-time'));
+      }
+    }
+
+    function showEmptyState(message) {
+      document.getElementById('cardGrid').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state-icon">◈</div>
+          <div class="empty-state-text">${message}</div>
+        </div>
+      `;
+    }
+
+    function showCardDetail(entryId) {
+      const entry = allEntries.find(e => e.id === entryId);
+      if (!entry) return;
+
+      const modal = document.getElementById('cardModal');
+      const title = document.getElementById('modalTitle');
+      const content = document.getElementById('modalContent');
+
+      title.textContent = entry.title;
+      content.innerHTML = `
+        <div style="color: #d1d5db;">
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Category</div>
+            <div style="padding: 6px 10px; background: ${categoryColors[entry.category]}20; border-left: 2px solid ${categoryColors[entry.category]}; border-radius: 2px;">
+              ${categoryLabels[entry.category]}
+            </div>
+          </div>
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Importance</div>
+            <div style="font-size: 16px;">${'★'.repeat(entry.importance)}${'☆'.repeat(5 - entry.importance)}</div>
+          </div>
+          ${entry.tags && entry.tags.length > 0 ? `
+            <div style="margin-bottom: 16px;">
+              <div style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">Tags</div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${entry.tags.map(tag => `
+                  <span style="padding: 4px 8px; background: #1f2937; border-radius: 3px; font-size: 12px;">
+                    ${escapeHtml(tag)}
+                  </span>
+                `).join('')}
+              </div>
+            </div>
+          ` : ''}
+          <div style="margin-bottom: 16px;">
+            <div style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">Content</div>
+            <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(entry.content)}</div>
+          </div>
+          ${entry.source ? `
+            <div style="margin-bottom: 16px;">
+              <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Source</div>
+              <div style="color: #9ca3af;">${escapeHtml(entry.source)}</div>
+            </div>
+          ` : ''}
+          <div style="font-size: 11px; color: #4b5563; padding-top: 16px; border-top: 1px solid #1f2937;">
+            Created ${formatTime(entry.created_at)}
+          </div>
+        </div>
+      `;
+
+      modal.classList.add('show');
+    }
+
+    function updateStats() {
+      const total = allEntries.length;
+      const embedded = allEntries.filter(e => e.embedding !== null).length;
+
+      document.getElementById('totalCount').textContent = total;
+      document.getElementById('embeddedCount').textContent = embedded;
+    }
+
+    // ===== Event Listeners =====
+    document.getElementById('categoryTabs').addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab')) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        e.target.classList.add('active');
+        currentFilter.category = e.target.dataset.category;
+        isSemanticSearch = false;
+        document.getElementById('keywordSearch').value = '';
+        applyFilters();
+      }
+    });
+
+    document.getElementById('importanceFilter').addEventListener('change', (e) => {
+      currentFilter.importance = parseInt(e.target.value);
+      isSemanticSearch = false;
+      applyFilters();
+    });
+
+    document.getElementById('keywordSearch').addEventListener('input', (e) => {
+      currentKeywordSearch = e.target.value;
+      isSemanticSearch = false;
+      applyFilters();
+    });
+
+    document.getElementById('keywordSearch').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        semanticSearch();
+      }
+    });
+
+    document.getElementById('semanticSearchBtn').addEventListener('click', semanticSearch);
+
+    // Modal controls
+    document.getElementById('modalClose').addEventListener('click', () => {
+      document.getElementById('cardModal').classList.remove('show');
+    });
+
+    document.getElementById('cardModal').addEventListener('click', (e) => {
+      if (e.target.id === 'cardModal') {
+        document.getElementById('cardModal').classList.remove('show');
+      }
+    });
+
+    // New entry panel
+    document.getElementById('newEntryBtn').addEventListener('click', () => {
+      document.getElementById('newEntryPanel').classList.add('show');
+      document.getElementById('newEntryForm').reset();
+      document.querySelector('input[name="secret"]').value = dashboardSecret;
+      document.getElementById('formMessage').innerHTML = '';
+    });
+
+    document.getElementById('panelClose').addEventListener('click', () => {
+      document.getElementById('newEntryPanel').classList.remove('show');
+    });
+
+    document.getElementById('panelCancel').addEventListener('click', () => {
+      document.getElementById('newEntryPanel').classList.remove('show');
+    });
+
+    document.getElementById('newEntryForm').addEventListener('submit', submitNewEntry);
+
+    async function submitNewEntry(e) {
+      e.preventDefault();
+
+      const formData = new FormData(e.target);
+      const secret = formData.get('secret');
+      const tags = formData.get('tags')
+        .split(',')
+        .map(t => t.trim())
+        .filter(t => t);
+
+      // Store secret
+      dashboardSecret = secret;
+      localStorage.setItem('dashboardSecret', secret);
+
+      const btn = e.target.querySelector('.btn-submit');
+      btn.disabled = true;
+      const originalText = btn.textContent;
+      btn.textContent = 'Creating...';
+
+      try {
+        const response = await fetch(ADD_ENTRY_FUNCTION_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            secret,
+            title: formData.get('title'),
+            content: formData.get('content'),
+            category: formData.get('category'),
+            tags,
+            importance: parseInt(formData.get('importance')),
+            source: formData.get('source') || null
+          })
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create entry');
+        }
+
+        showMessage('Entry created successfully!', 'success', 'formMessage');
+        setTimeout(() => {
+          document.getElementById('newEntryPanel').classList.remove('show');
+          loadEntries();
+        }, 1500);
+      } catch (err) {
+        console.error('Failed to create entry:', err);
+        showMessage(err.message || 'Failed to create entry', 'error', 'formMessage');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    }
+
+    // ===== Utilities =====
+    function formatTime(isoString) {
+      const date = new Date(isoString);
+      const now = new Date();
+      const seconds = Math.floor((now - date) / 1000);
+
+      if (seconds < 60) return 'just now';
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+      if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+
+      return date.toLocaleDateString();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function showMessage(message, type, targetId) {
+      const target = document.getElementById(targetId);
+      const className = type === 'success' ? 'success-message' : 'error-message';
+      target.innerHTML = `<div class="${className}">${message}</div>`;
+      if (type === 'success') {
+        setTimeout(() => target.innerHTML = '', 3000);
+      }
+    }
+
+    // ===== Init =====
+    window.addEventListener('DOMContentLoaded', initSupabase);
+  </script>
+</body>
+</html>
