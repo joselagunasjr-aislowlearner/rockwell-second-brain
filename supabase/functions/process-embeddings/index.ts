@@ -29,7 +29,7 @@ interface GoogleEmbeddingResponse {
 
 async function getEmbedding(text: string): Promise<number[]> {
   const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent",
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2-preview:embedContent",
     {
       method: "POST",
       headers: {
@@ -37,7 +37,7 @@ async function getEmbedding(text: string): Promise<number[]> {
         "x-goog-api-key": GOOGLE_EMBEDDING_API_KEY,
       },
       body: JSON.stringify({
-        model: "models/text-embedding-004",
+        model: "models/gemini-embedding-2-preview",
         content: {
           parts: [
             {
@@ -45,6 +45,7 @@ async function getEmbedding(text: string): Promise<number[]> {
             },
           ],
         },
+        outputDimensionality: 768,
       }),
     }
   );
@@ -57,7 +58,7 @@ async function getEmbedding(text: string): Promise<number[]> {
   return data.embedding.values;
 }
 
-async function processQueue() {
+async function processQueue(): Promise<{ processed: number; failed: number } | { processed: number; message: string }> {
   try {
     // Fetch up to 10 pending entries, oldest first
     const { data: pendingQueue, error: fetchError } = await supabase
@@ -70,12 +71,12 @@ async function processQueue() {
 
     if (fetchError) {
       console.error("Error fetching queue:", fetchError.message);
-      return;
+      return { processed: 0, failed: 0 };
     }
 
     if (!pendingQueue || pendingQueue.length === 0) {
       console.log("No pending embeddings to process");
-      return;
+      return { processed: 0, message: "Queue empty" };
     }
 
     const queueIds = (pendingQueue as QueueRow[]).map((row) => row.id);
@@ -88,8 +89,11 @@ async function processQueue() {
 
     if (updateError) {
       console.error("Error updating queue status:", updateError.message);
-      return;
+      return { processed: 0, failed: 0 };
     }
+
+    let processed = 0;
+    let failed = 0;
 
     // Process each entry
     for (const queueRow of pendingQueue as QueueRow[]) {
@@ -133,6 +137,7 @@ async function processQueue() {
           throw doneError;
         }
 
+        processed++;
         console.log(`Processed embedding for entry ${knowledgeEntry.id}`);
       } catch (error) {
         console.error(
@@ -168,21 +173,24 @@ async function processQueue() {
             updateQueueError.message
           );
         }
+        failed++;
       }
     }
 
     console.log("Queue processing completed");
+    return { processed, failed };
   } catch (error) {
     console.error(
       "Fatal error in processQueue:",
       error instanceof Error ? error.message : String(error)
     );
+    return { processed: 0, failed: 0 };
   }
 }
 
 Deno.serve(async () => {
-  await processQueue();
-  return new Response(JSON.stringify({ success: true }), {
+  const result = await processQueue();
+  return new Response(JSON.stringify(result), {
     headers: { "Content-Type": "application/json" },
   });
 });
