@@ -956,7 +956,7 @@
     };
 
     // ===== State =====
-    let supabase = null;
+    let db = null;
     let allEntries = [];
     let filteredEntries = [];
     let currentFilter = { category: 'all', importance: 0 };
@@ -966,14 +966,14 @@
 
     // ===== Initialize Supabase =====
     async function initSupabase() {
-      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+      db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
       updateAuthStatus();
       loadEntries();
     }
 
     function updateAuthStatus() {
       const status = document.getElementById('authStatus');
-      if (supabase) {
+      if (db) {
         status.textContent = 'Connected';
         status.classList.add('authed');
       }
@@ -982,7 +982,7 @@
     // ===== Load Entries =====
     async function loadEntries() {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from('knowledge_entries')
           .select('*')
           .order('created_at', { ascending: false });
@@ -1039,7 +1039,7 @@
 
       try {
         // Call search_knowledge RPC
-        const { data, error } = await supabase.rpc('search_knowledge', {
+        const { data, error } = await db.rpc('search_knowledge', {
           query_text: query,
           query_embedding: null, // Frontend doesn't generate embeddings
           match_count: 20
