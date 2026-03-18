@@ -7,3 +7,6 @@ supabase/.temp/
 mcp/dist/
 mcp/node_modules/
 .worktrees/
+.credentials/
+scripts/node_modules/
+scripts/dist/
