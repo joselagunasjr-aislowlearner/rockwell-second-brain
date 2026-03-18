@@ -45,10 +45,11 @@ npx tsx scripts/sync.ts --gmail-only
 1. Validate all required env vars — exit with named error if any missing
 2. Google OAuth handshake — browser flow on first run, silent refresh on subsequent runs
 3. Load all existing `source` URLs from Supabase `knowledge_entries` into a Set (duplicate guard)
-4. **Drive:** search by keywords → extract text → summarize via Claude → filter duplicates → stage
-5. **Gmail:** search by query → fetch threads → summarize via Claude → filter duplicates → stage
-6. Batch insert all new entries to Supabase
-7. Print summary report to stdout
+4. **Drive:** search by keywords → extract text → summarize via Claude → filter duplicates → insert individually
+5. **Gmail:** search by query → fetch threads → summarize via Claude → filter duplicates → insert individually
+6. Print summary report to stdout
+
+**Insert strategy:** Entries are inserted one at a time (not batched). Each insert is independent — a failure on one item is logged and skipped without affecting others. No rollback needed; partial syncs are safe because duplicate detection prevents re-insertion on the next run.
 
 ---
 
@@ -70,6 +71,8 @@ All secrets in `.env` (gitignored). Validated at startup before any API call.
 
 After first browser authorization, the refresh token is saved to `.credentials/google-oauth-token.json` (gitignored). Subsequent runs load and refresh silently.
 
+**Token expiry:** Google refresh tokens expire after 6 months of inactivity. If the stored token is invalid or expired, the script detects the auth error at startup, deletes the stale token file, and triggers the browser OAuth flow again with a clear message: `"Google credentials expired — re-authorizing in browser…"`
+
 ### Google OAuth Scopes
 
 - `https://www.googleapis.com/auth/drive.readonly`
@@ -86,15 +89,17 @@ Source URLs are stored in the `source` field of `knowledge_entries`:
 
 On each run, the script loads all existing source values into a Set and skips any item whose source URL already exists.
 
+**Scale note:** This is a personal knowledge base. Loading all sources into memory is safe up to ~10,000 entries. At that scale the query is fast and memory usage is negligible. No pagination strategy is needed for this use case.
+
 ---
 
 ## Content Handling & Summarization
 
 ### Google Drive
 
-- **Supported formats:** Google Docs (exported as `text/plain`), PDFs (exported as `text/plain` via Drive API), plain text files
-- **Unsupported formats:** Images, spreadsheets, presentations, binaries — logged as `[SKIP]` and skipped
-- **Text truncation:** 10,000 characters max before sending to Claude
+- **Supported MIME types:** `application/vnd.google-apps.document` (Google Docs, exported as `text/plain`), `application/pdf` (exported as `text/plain` via Drive API), `text/plain`. Detection is by MIME type from the Drive API `files.list` response — not file extension.
+- **Unsupported formats:** All other MIME types (images, spreadsheets, presentations, binaries) — logged as `[SKIP] {filename} — unsupported type ({mimeType})` and skipped
+- **Text truncation:** 10,000 characters max before sending to Claude. The Claude prompt notes when content was truncated so it can produce an appropriately scoped summary.
 - **Search:** Drive API `files.list` with `fullText contains` query built from `DRIVE_SEARCH_KEYWORDS`
 
 ### Gmail
@@ -130,6 +135,10 @@ interface SummarizeOutput {
 
 Claude is instructed to return JSON with these four fields. Category must be one of: `open_thread`, `contact`, `vendor`, `decision`, `client`, `strategy`, `lesson`. Claude determines category and importance from content — no fragile keyword-mapping logic.
 
+**Field length limits** (matching existing MCP validation):
+- `title`: max 255 characters — truncated with `…` if Claude returns longer
+- `summary` (stored as `content`): max 2,000 characters — truncated with `…` if Claude returns longer
+
 **Model:** `claude-haiku-4-5-20251001` (fast, cheap, excellent at structured extraction)
 
 ---
@@ -150,11 +159,14 @@ Claude is instructed to return JSON with these four fields. Category must be one
 | Failure type | Behavior |
 |---|---|
 | Missing env var at startup | Exit immediately with named error |
-| Google auth failure | Exit immediately with clear message |
-| Drive file unreadable / unsupported format | Log `[SKIP] {filename} — {reason}`, continue |
-| Claude API failure for single item | Log `[SKIP] {title} — Claude error`, continue |
-| Supabase insert failure for single item | Log `[SKIP] {title} — DB error`, continue |
-| Auth failure mid-run | Exit with clear message |
+| Google auth failure at startup | Exit immediately with clear message; re-auth if token expired |
+| Drive file unreadable / unsupported MIME type | Log `[SKIP] {filename} — {reason}`, continue |
+| Claude API failure (single item) | Retry once after 2s backoff; if still failing, log `[SKIP] {title} — Claude error`, continue |
+| Claude rate limit (429) | Retry after 60s backoff; if still failing, log `[SKIP]` and continue |
+| Supabase insert failure (single item) | Log `[SKIP] {title} — DB error: {message}`, continue |
+| Auth failure mid-run (token revoked) | Log error to stderr, exit immediately — do not attempt further inserts |
+
+**Partial sync safety:** Because inserts are individual and duplicate detection uses source URLs, a mid-run failure leaves the knowledge base in a valid partial state. Re-running the script picks up where it left off without creating duplicates.
 
 Errors go to stderr. Progress output goes to stdout.
 
