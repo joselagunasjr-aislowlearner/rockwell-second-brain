@@ -1,531 +1,390 @@
-import {
-  Server,
-  StdioServerTransport,
-} from "@modelcontextprotocol/sdk/server/stdio.js";
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool,
-  TextContent,
-} from "@modelcontextprotocol/sdk/types.js";
-import { createClient } from "@supabase/supabase-js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+} from '@modelcontextprotocol/sdk/types.js'
+import { createClient, SupabaseClient } from '@supabase/supabase-js'
 
-// ============================================================================
-// Environment Variables & Client Initialization
-// ============================================================================
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const GOOGLE_EMBEDDING_API_KEY = process.env.GOOGLE_EMBEDDING_API_KEY;
+export const VALID_CATEGORIES = [
+  'decision',
+  'contact',
+  'lesson',
+  'open_thread',
+  'vendor',
+  'client',
+  'strategy',
+  'daily_note',
+] as const
 
-// Validate environment variables at startup
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !GOOGLE_EMBEDDING_API_KEY) {
-  console.error(
-    "Missing required environment variables. Please set SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and GOOGLE_EMBEDDING_API_KEY"
-  );
-  process.exit(1);
+type Category = (typeof VALID_CATEGORIES)[number]
+
+// ─── Startup Validation ───────────────────────────────────────────────────────
+
+const REQUIRED_ENV = [
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'GOOGLE_EMBEDDING_API_KEY',
+] as const
+
+const missing = REQUIRED_ENV.filter((key) => !process.env[key])
+if (missing.length > 0) {
+  process.stderr.write(
+    `[rockwell-second-brain] Missing required env vars: ${missing.join(', ')}\n`
+  )
+  process.exit(1)
 }
 
-// Initialize Supabase client
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+const SUPABASE_URL = process.env.SUPABASE_URL!
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
+const GOOGLE_EMBEDDING_API_KEY = process.env.GOOGLE_EMBEDDING_API_KEY!
 
-// Initialize Google Generative AI client
-const googleAI = new GoogleGenerativeAI(GOOGLE_EMBEDDING_API_KEY);
+// ─── Supabase client ──────────────────────────────────────────────────────────
 
-// ============================================================================
-// Input Validation Functions
-// ============================================================================
+export let supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
 
-interface SearchBrainInput {
-  query: string;
-  limit?: number;
+// ─── Validation Functions (exported for testing) ──────────────────────────────
+
+interface SearchArgs {
+  query: string
+  limit: number
 }
 
-interface AddEntryInput {
-  title: string;
-  content: string;
-  category: string;
-  tags?: string[];
-  importance?: number;
-  source?: string;
+interface AddEntryArgs {
+  title: string
+  content: string
+  category: string
+  tags: string[]
+  importance: number
+  source: string | null
 }
 
-interface ListEntriesInput {
-  limit?: number;
-  category?: string;
+interface ListArgs {
+  limit: number
+  category: string | undefined
 }
 
-interface ValidationResult {
-  valid: boolean;
-  errors: string[];
-}
+type ValidationError = { error: string }
 
-function validateSearchBrainInput(input: unknown): ValidationResult {
-  const errors: string[] = [];
+export function validateSearchArgs(args: Record<string, unknown>): SearchArgs | ValidationError {
+  const query = args.query
 
-  if (typeof input !== "object" || input === null) {
-    return { valid: false, errors: ["Input must be an object"] };
+  if (!query || typeof query !== 'string' || query.trim().length === 0) {
+    return { error: 'query is required and must be a non-empty string' }
+  }
+  if (query.length > 500) {
+    return { error: 'query must be 500 characters or fewer' }
   }
 
-  const data = input as Record<string, unknown>;
+  const rawLimit = args.limit
+  const limit = rawLimit !== undefined
+    ? Math.min(Math.max(1, Number(rawLimit)), 20)
+    : 10
 
-  if (typeof data.query !== "string") {
-    errors.push("query must be a string");
-  } else if (data.query.length === 0) {
-    errors.push("query cannot be empty");
+  return { query: query.trim(), limit }
+}
+
+export function validateAddEntryArgs(args: Record<string, unknown>): AddEntryArgs | ValidationError {
+  const title = args.title
+  const content = args.content
+  const category = args.category
+  const tags = args.tags
+  const importance = args.importance
+  const source = args.source
+
+  if (!title || typeof title !== 'string' || title.trim().length === 0) {
+    return { error: 'title is required and must be a non-empty string' }
   }
-
-  let limit = 10; // default
-  if (data.limit !== undefined) {
-    if (typeof data.limit !== "number") {
-      errors.push("limit must be a number");
-    } else {
-      limit = Math.max(1, Math.min(20, data.limit));
+  if (title.length > 500) {
+    return { error: 'title must be 500 characters or fewer' }
+  }
+  if (!content || typeof content !== 'string' || content.trim().length === 0) {
+    return { error: 'content is required and must be a non-empty string' }
+  }
+  if (content.length > 10000) {
+    return { error: 'content must be 10,000 characters or fewer' }
+  }
+  if (!category || typeof category !== 'string') {
+    return { error: `category is required. Must be one of: ${VALID_CATEGORIES.join(', ')}` }
+  }
+  if (!VALID_CATEGORIES.includes(category as Category)) {
+    return { error: `category must be one of: ${VALID_CATEGORIES.join(', ')}` }
+  }
+  if (tags !== undefined) {
+    if (!Array.isArray(tags)) {
+      return { error: 'tags must be an array of strings' }
+    }
+    if (tags.length > 20) {
+      return { error: 'tags must have 20 items or fewer' }
     }
   }
+
+  const clampedImportance =
+    importance !== undefined
+      ? Math.min(Math.max(1, Number(importance)), 5)
+      : 3
 
   return {
-    valid: errors.length === 0,
-    errors,
-  };
+    title: title.trim(),
+    content: content.trim(),
+    category,
+    tags: Array.isArray(tags) ? tags : [],
+    importance: clampedImportance,
+    source: typeof source === 'string' ? source : null,
+  }
 }
 
-function validateAddEntryInput(input: unknown): ValidationResult {
-  const errors: string[] = [];
+export function validateListArgs(args: Record<string, unknown>): ListArgs | ValidationError {
+  const rawLimit = args.limit
+  const limit = rawLimit !== undefined
+    ? Math.min(Math.max(1, Number(rawLimit)), 50)
+    : 10
 
-  if (typeof input !== "object" || input === null) {
-    return { valid: false, errors: ["Input must be an object"] };
-  }
-
-  const data = input as Record<string, unknown>;
-
-  if (typeof data.title !== "string") {
-    errors.push("title must be a string");
-  } else if (data.title.length === 0) {
-    errors.push("title cannot be empty");
-  } else if (data.title.length > 500) {
-    errors.push("title cannot exceed 500 characters");
-  }
-
-  if (typeof data.content !== "string") {
-    errors.push("content must be a string");
-  } else if (data.content.length === 0) {
-    errors.push("content cannot be empty");
-  } else if (data.content.length > 10000) {
-    errors.push("content cannot exceed 10000 characters");
-  }
-
-  const validCategories = [
-    "work",
-    "personal",
-    "health",
-    "finance",
-    "learning",
-    "ideas",
-    "projects",
-    "other",
-  ];
-  if (typeof data.category !== "string") {
-    errors.push("category must be a string");
-  } else if (!validCategories.includes(data.category)) {
-    errors.push(
-      `category must be one of: ${validCategories.join(", ")}`
-    );
-  }
-
-  if (data.tags !== undefined) {
-    if (!Array.isArray(data.tags)) {
-      errors.push("tags must be an array");
-    } else if (data.tags.length > 20) {
-      errors.push("tags cannot exceed 20 items");
-    } else if (!data.tags.every((tag) => typeof tag === "string")) {
-      errors.push("all tags must be strings");
+  const category = args.category
+  if (category !== undefined && category !== null) {
+    if (typeof category !== 'string' || !VALID_CATEGORIES.includes(category as Category)) {
+      return { error: `category must be one of: ${VALID_CATEGORIES.join(', ')}` }
     }
+    return { limit, category }
   }
 
-  if (data.importance !== undefined) {
-    if (typeof data.importance !== "number") {
-      errors.push("importance must be a number");
-    } else if (data.importance < 1 || data.importance > 5) {
-      errors.push("importance must be between 1 and 5");
+  return { limit, category: undefined }
+}
+
+// ─── Embedding Helper ─────────────────────────────────────────────────────────
+
+async function embedQuery(query: string): Promise<number[]> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${GOOGLE_EMBEDDING_API_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'models/text-embedding-004',
+        content: { parts: [{ text: query }] },
+      }),
     }
+  )
+  if (!res.ok) {
+    throw new Error(`Google Embedding API error ${res.status}: ${await res.text()}`)
   }
+  const data = (await res.json()) as { embedding: { values: number[] } }
+  return data.embedding.values
+}
 
-  if (data.source !== undefined && typeof data.source !== "string") {
-    errors.push("source must be a string");
-  }
+// ─── Tool Result Helpers ──────────────────────────────────────────────────────
 
+interface ToolResult {
+  content: { type: 'text'; text: string }[]
+  isError?: true
+}
+
+function ok(data: unknown): ToolResult {
+  return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] }
+}
+
+function err(message: string): ToolResult {
   return {
-    valid: errors.length === 0,
-    errors,
-  };
+    content: [{ type: 'text', text: `Error: ${message}` }],
+    isError: true,
+  }
 }
 
-function validateListEntriesInput(input: unknown): ValidationResult {
-  const errors: string[] = [];
+// ─── Tool Handler (exported for testing) ─────────────────────────────────────
 
-  if (typeof input !== "object" || input === null) {
-    return { valid: false, errors: ["Input must be an object"] };
-  }
+export async function handleTool(
+  name: string,
+  args: Record<string, unknown>
+): Promise<ToolResult> {
+  if (name === 'search_brain') {
+    const validated = validateSearchArgs(args)
+    if ('error' in validated) return err(validated.error)
 
-  const data = input as Record<string, unknown>;
-
-  if (data.limit !== undefined) {
-    if (typeof data.limit !== "number") {
-      errors.push("limit must be a number");
-    } else if (data.limit < 1 || data.limit > 50) {
-      errors.push("limit must be between 1 and 50");
-    }
-  }
-
-  const validCategories = [
-    "work",
-    "personal",
-    "health",
-    "finance",
-    "learning",
-    "ideas",
-    "projects",
-    "other",
-  ];
-  if (
-    data.category !== undefined &&
-    typeof data.category === "string" &&
-    !validCategories.includes(data.category)
-  ) {
-    errors.push(
-      `category must be one of: ${validCategories.join(", ")}`
-    );
-  } else if (data.category !== undefined && typeof data.category !== "string") {
-    errors.push("category must be a string");
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
-
-// ============================================================================
-// Embedding Generation
-// ============================================================================
-
-async function generateEmbedding(text: string): Promise<number[]> {
-  const model = googleAI.getGenerativeModel({
-    model: "text-embedding-004",
-  });
-
-  const result = await model.embedContent(text);
-  return result.embedding.values;
-}
-
-// ============================================================================
-// Tool Handlers
-// ============================================================================
-
-async function handleSearchBrain(input: unknown): Promise<string> {
-  const validation = validateSearchBrainInput(input);
-  if (!validation.valid) {
-    console.error("Validation error:", validation.errors.join("; "));
-    return JSON.stringify({
-      error: `Invalid input: ${validation.errors.join("; ")}`,
-    });
-  }
-
-  try {
-    const data = input as Record<string, unknown>;
-    const query = data.query as string;
-    let limit = 10;
-    if (typeof data.limit === "number") {
-      limit = Math.max(1, Math.min(20, data.limit));
+    let embedding: number[]
+    try {
+      embedding = await embedQuery(validated.query)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      process.stderr.write(`[search_brain] embed failed: ${message}\n`)
+      return err(`Failed to embed query — ${message}`)
     }
 
-    // Generate embedding for the query
-    const queryEmbedding = await generateEmbedding(query);
-
-    // Execute hybrid search RPC
-    const { data: results, error } = await supabase.rpc("hybrid_search", {
-      query_embedding: queryEmbedding,
-      query_text: query,
-      limit,
-    });
-
+    const { data, error } = await supabase.rpc('search_knowledge', {
+      query_embedding: embedding,
+      query_text: validated.query,
+      match_count: validated.limit,
+    })
     if (error) {
-      console.error("Search error:", error);
-      return JSON.stringify({ error: "Search failed", details: error.message });
+      process.stderr.write(`[search_brain] Supabase error: ${error.message}\n`)
+      return err(error.message)
     }
-
-    // Add RRF scores and format results
-    const formattedResults = (results || []).map((item: unknown, index: number) => {
-      const entry = item as Record<string, unknown>;
-      return {
-        id: entry.id,
-        title: entry.title,
-        content: entry.content,
-        category: entry.category,
-        tags: entry.tags || [],
-        importance: entry.importance || 3,
-        source: entry.source,
-        created_at: entry.created_at,
-        rrf_score: 1 / (60 + index),
-      };
-    });
-
-    return JSON.stringify(formattedResults);
-  } catch (error) {
-    console.error("Search handler error:", error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return JSON.stringify({ error: "Search handler failed", details: errorMessage });
-  }
-}
-
-async function handleAddEntry(input: unknown): Promise<string> {
-  const validation = validateAddEntryInput(input);
-  if (!validation.valid) {
-    console.error("Validation error:", validation.errors.join("; "));
-    return JSON.stringify({
-      error: `Invalid input: ${validation.errors.join("; ")}`,
-    });
+    return ok(data)
   }
 
-  try {
-    const data = input as Record<string, unknown>;
-    const title = data.title as string;
-    const content = data.content as string;
-    const category = data.category as string;
-    const tags = (data.tags as string[]) || [];
-    const importance = (data.importance as number) || 3;
-    const source = (data.source as string) || null;
+  if (name === 'add_entry') {
+    const validated = validateAddEntryArgs(args)
+    if ('error' in validated) return err(validated.error)
 
-    // Generate embedding for the content
-    const embedding = await generateEmbedding(content);
-
-    // Insert into database
-    const { data: result, error } = await supabase
-      .from("brain_entries")
+    const { data, error } = await supabase
+      .from('knowledge_entries')
       .insert({
-        title,
-        content,
-        category,
-        tags,
-        importance,
-        source,
-        embedding,
+        title: validated.title,
+        content: validated.content,
+        category: validated.category,
+        tags: validated.tags,
+        importance: validated.importance,
+        source: validated.source,
       })
-      .select("id, created_at")
-      .single();
+      .select('id, created_at')
+      .single()
 
     if (error) {
-      console.error("Insert error:", error);
-      return JSON.stringify({ error: "Failed to add entry", details: error.message });
+      process.stderr.write(`[add_entry] Supabase error: ${error.message}\n`)
+      return err(error.message)
     }
-
-    return JSON.stringify({
-      id: result.id,
-      created_at: result.created_at,
-    });
-  } catch (error) {
-    console.error("Add entry handler error:", error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return JSON.stringify({
-      error: "Add entry handler failed",
-      details: errorMessage,
-    });
-  }
-}
-
-async function handleListEntries(input: unknown): Promise<string> {
-  const validation = validateListEntriesInput(input);
-  if (!validation.valid) {
-    console.error("Validation error:", validation.errors.join("; "));
-    return JSON.stringify({
-      error: `Invalid input: ${validation.errors.join("; ")}`,
-    });
+    return ok(data)
   }
 
-  try {
-    const data = input as Record<string, unknown>;
-    let limit = 10;
-    if (typeof data.limit === "number") {
-      limit = Math.max(1, Math.min(50, data.limit));
-    }
-    const category = data.category as string | undefined;
+  if (name === 'list_entries') {
+    const validated = validateListArgs(args)
+    if ('error' in validated) return err(validated.error)
 
-    // Build query
     let query = supabase
-      .from("brain_entries")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(limit);
+      .from('knowledge_entries')
+      .select('id, title, content, category, tags, importance, source, created_at')
+      .order('importance', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(validated.limit)
 
-    // Apply category filter if provided
-    if (category) {
-      query = query.eq("category", category);
+    if (validated.category) {
+      query = query.eq('category', validated.category)
     }
 
-    const { data: results, error } = await query;
-
+    const { data, error } = await query
     if (error) {
-      console.error("List error:", error);
-      return JSON.stringify({ error: "Failed to list entries", details: error.message });
+      process.stderr.write(`[list_entries] Supabase error: ${error.message}\n`)
+      return err(error.message)
     }
-
-    return JSON.stringify(results || []);
-  } catch (error) {
-    console.error("List entries handler error:", error);
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    return JSON.stringify({
-      error: "List entries handler failed",
-      details: errorMessage,
-    });
+    return ok(data)
   }
+
+  return err(`Unknown tool: ${name}`)
 }
 
-// ============================================================================
-// MCP Server Setup
-// ============================================================================
+// ─── MCP Server Setup ─────────────────────────────────────────────────────────
 
-const server = new Server({
-  name: "rockwell-second-brain",
-  version: "1.0.0",
-});
+const server = new Server(
+  { name: 'rockwell-second-brain', version: '1.0.0' },
+  { capabilities: { tools: {} } }
+)
 
-// Define tools
-const tools: Tool[] = [
+const TOOL_DEFINITIONS = [
   {
-    name: "search_brain",
+    name: 'search_brain',
     description:
-      "Search the Rockwell Second Brain using semantic and full-text search. Returns results ordered by relevance with RRF scores.",
+      'Semantic + keyword hybrid search over the Rockwell Second Brain knowledge base. ' +
+      'Finds entries by meaning, not just exact keywords.',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
         query: {
-          type: "string",
-          description: "Search query",
+          type: 'string',
+          description: 'Natural language search query',
+          maxLength: 500,
         },
         limit: {
-          type: "number",
-          description: "Maximum number of results (1-20, default: 10)",
+          type: 'integer',
+          description: 'Max results to return (default: 10, max: 20)',
+          minimum: 1,
+          maximum: 20,
         },
       },
-      required: ["query"],
+      required: ['query'],
     },
   },
   {
-    name: "add_entry",
+    name: 'add_entry',
     description:
-      "Add a new entry to the Rockwell Second Brain with semantic embedding for search.",
+      'Add a new knowledge entry to the Rockwell Second Brain. ' +
+      'The entry will be automatically embedded within 2 minutes for semantic search.',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
-        title: {
-          type: "string",
-          description: "Entry title (max 500 characters)",
-        },
-        content: {
-          type: "string",
-          description: "Entry content (max 10000 characters)",
-        },
+        title: { type: 'string', description: 'Entry title', maxLength: 500 },
+        content: { type: 'string', description: 'Entry content', maxLength: 10000 },
         category: {
-          type: "string",
+          type: 'string',
+          enum: VALID_CATEGORIES,
           description:
-            'Category: work, personal, health, finance, learning, ideas, projects, or other',
+            'Entry category: decision | contact | lesson | open_thread | vendor | client | strategy | daily_note',
         },
         tags: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional tags (max 20 items)",
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags for filtering (max 20)',
+          maxItems: 20,
         },
         importance: {
-          type: "number",
-          description: "Importance level 1-5 (default: 3)",
+          type: 'integer',
+          description: 'Importance 1–5, where 5 is most critical (default: 3)',
+          minimum: 1,
+          maximum: 5,
         },
         source: {
-          type: "string",
-          description: "Optional source reference",
+          type: 'string',
+          description: 'Source of the information (e.g. "client call", "legal", "architecture decision")',
         },
       },
-      required: ["title", "content", "category"],
+      required: ['title', 'content', 'category'],
     },
   },
   {
-    name: "list_entries",
+    name: 'list_entries',
     description:
-      "List entries from the Rockwell Second Brain, optionally filtered by category.",
+      'List recent knowledge entries ordered by importance (highest first), then by date. ' +
+      'Optionally filter by category.',
     inputSchema: {
-      type: "object" as const,
+      type: 'object',
       properties: {
         limit: {
-          type: "number",
-          description: "Maximum number of results (1-50, default: 10)",
+          type: 'integer',
+          description: 'Max results to return (default: 10, max: 50)',
+          minimum: 1,
+          maximum: 50,
         },
         category: {
-          type: "string",
-          description:
-            'Optional category filter: work, personal, health, finance, learning, ideas, projects, or other',
+          type: 'string',
+          enum: VALID_CATEGORIES,
+          description: 'Filter by category',
         },
       },
-      required: [],
     },
   },
-];
+]
 
-// Register tools
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return { tools };
-});
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: TOOL_DEFINITIONS,
+}))
 
-// Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const toolName = request.params.name;
-  const toolInput = request.params.arguments;
+  const { name, arguments: args } = request.params
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return handleTool(name, (args ?? {}) as Record<string, unknown>) as any
+})
 
-  let result: string;
-
-  try {
-    switch (toolName) {
-      case "search_brain":
-        result = await handleSearchBrain(toolInput);
-        break;
-      case "add_entry":
-        result = await handleAddEntry(toolInput);
-        break;
-      case "list_entries":
-        result = await handleListEntries(toolInput);
-        break;
-      default:
-        result = JSON.stringify({ error: `Unknown tool: ${toolName}` });
-    }
-  } catch (error) {
-    console.error(`Tool ${toolName} error:`, error);
-    result = JSON.stringify({
-      error: "Tool execution failed",
-      details: error instanceof Error ? error.message : String(error),
-    });
-  }
-
-  const content: TextContent[] = [
-    {
-      type: "text",
-      text: result,
-    },
-  ];
-
-  return { content };
-});
-
-// ============================================================================
-// Server Start
-// ============================================================================
+// ─── Entry Point ──────────────────────────────────────────────────────────────
 
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
-  console.error("Rockwell Second Brain MCP server started");
+  const transport = new StdioServerTransport()
+  await server.connect(transport)
+  process.stderr.write('[rockwell-second-brain] MCP server running\n')
 }
 
-main().catch((error) => {
-  console.error("Failed to start server:", error);
-  process.exit(1);
-});
+main().catch((e) => {
+  process.stderr.write(
+    `[rockwell-second-brain] Fatal error: ${e instanceof Error ? e.message : String(e)}\n`
+  )
+  process.exit(1)
+})
