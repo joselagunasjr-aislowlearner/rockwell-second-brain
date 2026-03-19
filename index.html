@@ -5,359 +5,303 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Rockwell Second Brain</title>
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/timeago.js@4.0.0-beta.3/dist/timeago.min.js"></script>
   <style>
-    * {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #080b10;
+      --surface: rgba(255,255,255,0.04);
+      --surface-hover: rgba(255,255,255,0.07);
+      --border: rgba(255,255,255,0.08);
+      --border-bright: rgba(255,255,255,0.15);
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --blue: #3b82f6;
+      --blue-dim: rgba(59,130,246,0.15);
+      --green: #22c55e;
+      --green-dim: rgba(34,197,94,0.12);
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --red-dim: rgba(239,68,68,0.12);
+      --purple: #a855f7;
+      --cyan: #06b6d4;
+      --indigo: #6366f1;
+      --slate: #6b7280;
+      --radius: 8px;
+      --radius-sm: 5px;
+      --shadow: 0 8px 32px rgba(0,0,0,0.4);
     }
 
-    html, body {
-      width: 100%;
-      height: 100%;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #0a0a0a;
-      color: #e5e7eb;
-    }
+    html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    body { overflow: hidden; }
 
-    body {
-      overflow: hidden;
-    }
-
-    /* Layout */
-    .app {
-      display: grid;
-      grid-template-rows: auto 1fr;
-      height: 100vh;
-      width: 100%;
-    }
+    /* ── Layout ── */
+    .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
 
     .header {
-      border-bottom: 1px solid #1f2937;
-      padding: 24px;
-      background: linear-gradient(135deg, #0a0a0a 0%, #111827 100%);
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,11,16,0.95);
+      backdrop-filter: blur(12px);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 32px;
+      gap: 24px;
+      position: sticky; top: 0; z-index: 10;
     }
 
     .header-title {
       font-family: 'Clash Display', sans-serif;
-      font-size: 32px;
+      font-size: 22px;
       font-weight: 700;
-      letter-spacing: -1px;
-      background: linear-gradient(135deg, #fff 0%, #d1d5db 100%);
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
-    .header-controls {
+    .status-badge {
       display: flex;
-      gap: 16px;
       align-items: center;
-    }
-
-    .auth-status {
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 20px;
       font-size: 12px;
-      color: #9ca3af;
-      padding: 8px 12px;
-      background: #111827;
-      border-radius: 4px;
-      border: 1px solid #1f2937;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      transition: all 0.2s;
     }
 
-    .auth-status.authed {
-      color: #22c55e;
-      border-color: #22c55e;
-      background: rgba(34, 197, 94, 0.1);
+    .status-badge.unlocked {
+      border-color: rgba(34,197,94,0.3);
+      background: var(--green-dim);
+      color: var(--green);
+    }
+
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
     }
 
     .content-area {
       display: grid;
-      grid-template-columns: 1fr 240px;
+      grid-template-columns: 1fr 220px;
       height: 100%;
       overflow: hidden;
     }
 
-    .main {
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
+    .main { display: flex; flex-direction: column; overflow: hidden; }
 
+    /* ── Filters ── */
     .filters-bar {
-      padding: 20px 24px;
-      border-bottom: 1px solid #1f2937;
-      background: #0f1419;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,11,16,0.8);
     }
 
-    .filter-group {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
+    .filter-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 
-    .category-tabs {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
+    .category-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
 
     .tab {
-      padding: 6px 12px;
-      border-radius: 4px;
+      padding: 5px 11px;
+      border-radius: 20px;
       border: 1px solid transparent;
-      background: #1f2937;
-      color: #9ca3af;
-      font-size: 13px;
+      background: var(--surface);
+      color: var(--text-muted);
+      font-size: 12px;
       font-weight: 500;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
+      white-space: nowrap;
     }
+    .tab:hover { background: var(--surface-hover); color: var(--text-dim); border-color: var(--border); }
+    .tab.active { color: #fff; border-color: var(--blue); background: var(--blue-dim); }
+    .tab.active[data-category="contact"]     { border-color: var(--green);  background: var(--green-dim); }
+    .tab.active[data-category="lesson"]      { border-color: var(--amber);  background: rgba(245,158,11,0.12); }
+    .tab.active[data-category="open_thread"] { border-color: var(--red);    background: var(--red-dim); }
+    .tab.active[data-category="vendor"]      { border-color: var(--purple); background: rgba(168,85,247,0.12); }
+    .tab.active[data-category="client"]      { border-color: var(--cyan);   background: rgba(6,182,212,0.12); }
+    .tab.active[data-category="strategy"]    { border-color: var(--indigo); background: rgba(99,102,241,0.12); }
+    .tab.active[data-category="daily_note"]  { border-color: var(--slate);  background: rgba(107,114,128,0.12); }
 
-    .tab:hover {
-      background: #2d3748;
-      color: #e5e7eb;
-    }
+    .filter-divider { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
 
-    .tab.active {
-      color: #fff;
-      border-color: #3b82f6;
-      background: rgba(59, 130, 246, 0.15);
-    }
-
-    .tab.active[data-category="contact"] {
-      border-color: #22c55e;
-      background: rgba(34, 197, 94, 0.15);
-    }
-
-    .tab.active[data-category="lesson"] {
-      border-color: #f59e0b;
-      background: rgba(245, 158, 11, 0.15);
-    }
-
-    .tab.active[data-category="open_thread"] {
-      border-color: #ef4444;
-      background: rgba(239, 68, 68, 0.15);
-    }
-
-    .tab.active[data-category="vendor"] {
-      border-color: #a855f7;
-      background: rgba(168, 85, 247, 0.15);
-    }
-
-    .tab.active[data-category="client"] {
-      border-color: #06b6d4;
-      background: rgba(6, 182, 212, 0.15);
-    }
-
-    .tab.active[data-category="strategy"] {
-      border-color: #6366f1;
-      background: rgba(99, 102, 241, 0.15);
-    }
-
-    .tab.active[data-category="daily_note"] {
-      border-color: #6b7280;
-      background: rgba(107, 114, 128, 0.15);
-    }
-
-    .filter-divider {
-      width: 1px;
-      height: 24px;
-      background: #1f2937;
-    }
-
-    .importance-filter {
-      display: flex;
-      gap: 6px;
-      align-items: center;
-    }
-
-    .importance-filter label {
-      font-size: 13px;
-      color: #9ca3af;
-    }
+    .importance-filter { display: flex; gap: 6px; align-items: center; }
+    .importance-filter label { font-size: 12px; color: var(--text-muted); }
 
     .importance-select {
-      padding: 6px 10px;
-      background: #1f2937;
-      border: 1px solid #374151;
-      border-radius: 4px;
-      color: #e5e7eb;
-      font-size: 13px;
+      padding: 5px 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 12px;
       cursor: pointer;
-      transition: all 0.2s;
     }
+    .importance-select:hover { border-color: var(--border-bright); }
 
-    .importance-select:hover {
-      border-color: #4b5563;
-      background: #2d3748;
-    }
-
+    /* ── Search ── */
     .search-container {
-      padding: 20px 24px;
-      border-bottom: 1px solid #1f2937;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
       display: flex;
-      gap: 12px;
+      gap: 8px;
     }
 
     .search-input {
       flex: 1;
-      padding: 10px 12px;
-      background: #1f2937;
-      border: 1px solid #374151;
-      border-radius: 4px;
-      color: #e5e7eb;
-      font-size: 14px;
+      padding: 9px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      color: var(--text);
+      font-size: 13px;
       transition: all 0.2s;
     }
-
     .search-input:focus {
       outline: none;
-      border-color: #3b82f6;
-      background: #111827;
-      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+      border-color: var(--blue);
+      background: rgba(59,130,246,0.05);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
     }
-
-    .search-input::placeholder {
-      color: #6b7280;
-    }
+    .search-input::placeholder { color: var(--text-muted); }
 
     .search-semantic {
-      padding: 10px 12px;
-      background: #3b82f6;
+      padding: 9px 16px;
+      background: var(--blue);
       border: none;
-      border-radius: 4px;
+      border-radius: 24px;
       color: #fff;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.15s;
+      white-space: nowrap;
     }
+    .search-semantic:hover { background: #2563eb; }
+    .search-semantic:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    .search-semantic:hover {
-      background: #2563eb;
-    }
-
-    .search-semantic:active {
-      transform: scale(0.98);
-    }
-
-    .search-semantic.loading {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
+    /* ── Cards ── */
     .grid-container {
       flex: 1;
       overflow: auto;
-      padding: 24px;
-      background: #0a0a0a;
+      padding: 20px;
     }
 
     .card-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 16px;
-      animation: fadeIn 0.3s ease-out;
-    }
-
-    @keyframes fadeIn {
-      from {
-        opacity: 0;
-      }
-      to {
-        opacity: 1;
-      }
+      gap: 14px;
     }
 
     .card {
-      background: #141414;
-      border: 1px solid #1f2937;
-      border-radius: 6px;
-      overflow: hidden;
-      border-left: 4px solid #3b82f6;
-      transition: all 0.2s;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      border-left: 3px solid var(--blue);
+      transition: all 0.2s ease-out;
       cursor: pointer;
       display: flex;
       flex-direction: column;
-      max-height: 240px;
+      max-height: 230px;
+      position: relative;
+      backdrop-filter: blur(8px);
     }
-
     .card:hover {
-      border-color: #2d3748;
-      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
-      transform: translateY(-2px);
+      border-color: var(--border-bright);
+      border-left-color: inherit;
+      background: var(--surface-hover);
+      transform: translateY(-3px);
+      box-shadow: var(--shadow);
     }
 
-    .card[data-category="contact"] {
-      border-left-color: #22c55e;
-    }
+    .card[data-category="contact"]     { border-left-color: var(--green); }
+    .card[data-category="lesson"]      { border-left-color: var(--amber); }
+    .card[data-category="open_thread"] { border-left-color: var(--red); }
+    .card[data-category="vendor"]      { border-left-color: var(--purple); }
+    .card[data-category="client"]      { border-left-color: var(--cyan); }
+    .card[data-category="strategy"]    { border-left-color: var(--indigo); }
+    .card[data-category="daily_note"]  { border-left-color: var(--slate); }
 
-    .card[data-category="lesson"] {
-      border-left-color: #f59e0b;
+    /* Card action buttons — hidden until hover */
+    .card-actions {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
     }
+    .card:hover .card-actions { opacity: 1; }
 
-    .card[data-category="open_thread"] {
-      border-left-color: #ef4444;
+    .card-action-btn {
+      width: 26px; height: 26px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(8,11,16,0.9);
+      color: var(--text-dim);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
     }
+    .card-action-btn:hover { border-color: var(--border-bright); color: var(--text); background: var(--surface-hover); }
+    .card-action-btn.delete:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+    .card-action-btn.edit:hover   { border-color: var(--blue); color: var(--blue); background: var(--blue-dim); }
 
-    .card[data-category="vendor"] {
-      border-left-color: #a855f7;
+    /* Inline delete confirm */
+    .delete-confirm {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      background: rgba(8,11,16,0.95);
+      border: 1px solid rgba(239,68,68,0.4);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+      backdrop-filter: blur(8px);
     }
-
-    .card[data-category="client"] {
-      border-left-color: #06b6d4;
+    .delete-confirm span { margin-right: 4px; }
+    .confirm-yes, .confirm-no {
+      width: 22px; height: 22px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: none;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
     }
-
-    .card[data-category="strategy"] {
-      border-left-color: #6366f1;
-    }
-
-    .card[data-category="daily_note"] {
-      border-left-color: #6b7280;
-    }
+    .confirm-yes:hover { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+    .confirm-no:hover  { background: var(--surface-hover); border-color: var(--border-bright); color: var(--text); }
 
     .card-header {
-      padding: 12px 14px;
-      border-bottom: 1px solid #1f2937;
+      padding: 11px 12px 10px;
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
-      gap: 8px;
+      gap: 32px; /* leave room for action buttons */
     }
 
-    .card-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: #fff;
-      flex: 1;
-      line-height: 1.4;
-    }
+    .card-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; line-height: 1.4; }
+    .card-importance { color: var(--amber); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
 
-    .card-importance {
-      color: #f59e0b;
-      font-size: 12px;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-
-    .card-body {
-      padding: 12px 14px;
-      flex: 1;
-      overflow: hidden;
-      display: flex;
-      flex-direction: column;
-    }
-
+    .card-body { padding: 10px 12px; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
     .card-content {
-      font-size: 13px;
-      color: #d1d5db;
+      font-size: 12px;
+      color: var(--text-dim);
       line-height: 1.5;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -370,68 +314,63 @@
     .card-meta {
       margin-top: 8px;
       padding-top: 8px;
-      border-top: 1px solid #1f2937;
+      border-top: 1px solid var(--border);
       font-size: 11px;
-      color: #6b7280;
       display: flex;
       justify-content: space-between;
+      align-items: center;
     }
 
     .card-category {
-      background: #1f2937;
-      padding: 2px 6px;
-      border-radius: 2px;
-      font-size: 11px;
-      text-transform: capitalize;
-      color: #9ca3af;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      background: var(--surface-hover);
+      color: var(--text-muted);
     }
 
-    .card-time {
-      color: #6b7280;
-    }
+    .card-time { color: var(--text-muted); font-size: 10px; }
 
+    /* ── Empty / Loading states ── */
     .empty-state {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100%;
-      color: #6b7280;
+      height: 300px;
+      color: var(--text-muted);
+      gap: 12px;
     }
+    .empty-icon { font-size: 40px; opacity: 0.3; }
+    .empty-text { font-size: 14px; }
 
-    .empty-state-icon {
-      font-size: 48px;
-      margin-bottom: 16px;
-      opacity: 0.5;
-    }
-
-    .empty-state-text {
-      font-size: 14px;
-    }
-
+    /* ── Sidebar ── */
     .sidebar {
-      border-left: 1px solid #1f2937;
-      background: #0f1419;
-      padding: 20px;
+      border-left: 1px solid var(--border);
+      background: rgba(8,11,16,0.6);
+      padding: 18px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
       overflow: auto;
     }
 
     .sidebar-title {
-      font-size: 12px;
+      font-size: 10px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: #6b7280;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
     }
 
     .new-entry-btn {
-      padding: 12px;
-      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      padding: 10px;
+      background: linear-gradient(135deg, var(--blue), #2563eb);
       border: none;
-      border-radius: 4px;
+      border-radius: var(--radius);
       color: #fff;
       font-size: 13px;
       font-weight: 600;
@@ -439,331 +378,201 @@
       transition: all 0.2s;
       width: 100%;
     }
+    .new-entry-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(59,130,246,0.35); }
 
-    .new-entry-btn:hover {
-      transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-    }
-
-    .new-entry-btn:active {
-      transform: scale(0.98);
-    }
-
-    .stats {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      font-size: 12px;
-    }
-
+    .stats { display: flex; flex-direction: column; gap: 4px; }
     .stat {
       display: flex;
       justify-content: space-between;
-      color: #9ca3af;
-      padding: 6px 0;
-      border-bottom: 1px solid #1f2937;
+      align-items: center;
+      color: var(--text-muted);
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
     }
+    .stat-label { display: flex; align-items: center; gap: 6px; }
+    .stat-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .stat-value { font-weight: 600; color: var(--text); font-size: 13px; }
 
-    .stat-value {
-      font-weight: 600;
-      color: #e5e7eb;
-    }
-
-    /* Modal & Overlay */
+    /* ── Unlock Modal ── */
     .modal-overlay {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: rgba(0, 0, 0, 0.6);
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
       display: none;
       align-items: center;
       justify-content: center;
       z-index: 1000;
-      opacity: 0;
-      transition: opacity 0.2s;
+      backdrop-filter: blur(4px);
     }
-
-    .modal-overlay.show {
-      display: flex;
-      opacity: 1;
-    }
+    .modal-overlay.show { display: flex; }
 
     .modal {
-      background: #141414;
-      border: 1px solid #1f2937;
-      border-radius: 6px;
-      padding: 24px;
-      max-width: 600px;
-      max-height: 80vh;
-      overflow: auto;
-      animation: slideUp 0.3s ease-out;
+      background: #0f1419;
+      border: 1px solid var(--border-bright);
+      border-radius: 12px;
+      padding: 28px;
+      width: 360px;
+      box-shadow: var(--shadow);
+      animation: slideUp 0.25s ease-out;
     }
 
     @keyframes slideUp {
-      from {
-        transform: translateY(20px);
-        opacity: 0;
-      }
-      to {
-        transform: translateY(0);
-        opacity: 1;
-      }
+      from { transform: translateY(16px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
     }
 
     .modal-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
-      padding-bottom: 16px;
-      border-bottom: 1px solid #1f2937;
+      margin-bottom: 18px;
     }
-
-    .modal-title {
-      font-family: 'Clash Display', sans-serif;
-      font-size: 20px;
-      font-weight: 600;
-    }
-
+    .modal-title { font-family: 'Clash Display', sans-serif; font-size: 18px; font-weight: 600; }
+    .modal-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
     .modal-close {
-      background: none;
-      border: none;
-      color: #9ca3af;
-      font-size: 24px;
-      cursor: pointer;
-      transition: color 0.2s;
+      background: none; border: none;
+      color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1;
     }
+    .modal-close:hover { color: var(--text); }
 
-    .modal-close:hover {
-      color: #e5e7eb;
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 16px;
-    }
-
-    .form-label {
-      font-size: 13px;
-      font-weight: 600;
-      color: #d1d5db;
-      text-transform: capitalize;
-    }
-
-    .form-input,
-    .form-textarea,
-    .form-select {
-      padding: 10px 12px;
-      background: #1f2937;
-      border: 1px solid #374151;
-      border-radius: 4px;
-      color: #e5e7eb;
-      font-size: 14px;
-      font-family: 'Inter', sans-serif;
-      transition: all 0.2s;
-    }
-
-    .form-input:focus,
-    .form-textarea:focus,
-    .form-select:focus {
-      outline: none;
-      border-color: #3b82f6;
-      background: #111827;
-      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
-    }
-
-    .form-textarea {
-      resize: vertical;
-      min-height: 120px;
-      font-family: 'Inter', sans-serif;
-    }
-
-    .form-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-
-    .form-actions {
-      display: flex;
-      gap: 12px;
-      margin-top: 24px;
-      padding-top: 16px;
-      border-top: 1px solid #1f2937;
-    }
-
-    .btn-submit,
-    .btn-cancel {
-      flex: 1;
-      padding: 12px;
-      border-radius: 4px;
-      border: none;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .btn-submit {
-      background: #3b82f6;
-      color: #fff;
-    }
-
-    .btn-submit:hover:not(:disabled) {
-      background: #2563eb;
-    }
-
-    .btn-submit:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-
-    .btn-cancel {
-      background: #1f2937;
-      color: #e5e7eb;
-    }
-
-    .btn-cancel:hover {
-      background: #2d3748;
-    }
-
+    /* ── Side Panel ── */
     .sidebar-panel {
       position: fixed;
-      top: 0;
-      right: 0;
-      width: 360px;
+      top: 0; right: 0;
+      width: 380px;
       height: 100vh;
-      background: #141414;
-      border-left: 1px solid #1f2937;
+      background: #0d1117;
+      border-left: 1px solid var(--border);
       z-index: 999;
       transform: translateX(100%);
-      transition: transform 0.3s ease-out;
+      transition: transform 0.25s ease-out;
       display: flex;
       flex-direction: column;
-      overflow: auto;
     }
-
-    .sidebar-panel.show {
-      transform: translateX(0);
-    }
+    .sidebar-panel.show { transform: translateX(0); }
 
     .panel-header {
-      padding: 20px;
-      border-bottom: 1px solid #1f2937;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-shrink: 0;
     }
+    .panel-title { font-family: 'Clash Display', sans-serif; font-size: 17px; font-weight: 600; }
+    .panel-close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+    .panel-close:hover { color: var(--text); }
+    .panel-content { padding: 20px; flex: 1; overflow: auto; }
 
-    .panel-close {
-      background: none;
-      border: none;
-      color: #9ca3af;
-      font-size: 24px;
-      cursor: pointer;
+    /* ── Detail Modal ── */
+    .detail-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 998;
     }
-
-    .panel-close:hover {
-      color: #e5e7eb;
-    }
-
-    .panel-content {
-      padding: 20px;
-      flex: 1;
+    .detail-overlay.show { display: flex; }
+    .detail-modal {
+      background: #0f1419;
+      border: 1px solid var(--border-bright);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 560px;
+      width: 90%;
+      max-height: 80vh;
       overflow: auto;
+      box-shadow: var(--shadow);
+      animation: slideUp 0.25s ease-out;
+    }
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-title { font-family: 'Clash Display', sans-serif; font-size: 18px; font-weight: 600; flex: 1; margin-right: 12px; }
+
+    /* ── Forms ── */
+    .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+    .form-label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+    .form-input, .form-textarea, .form-select {
+      padding: 9px 11px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      transition: all 0.15s;
+    }
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      outline: none;
+      border-color: var(--blue);
+      background: rgba(59,130,246,0.05);
+      box-shadow: 0 0 0 2px rgba(59,130,246,0.1);
+    }
+    .form-textarea { resize: vertical; min-height: 110px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .form-actions {
+      display: flex; gap: 10px;
+      margin-top: 20px; padding-top: 14px;
+      border-top: 1px solid var(--border);
     }
 
-    .error-message {
-      padding: 12px;
-      background: rgba(239, 68, 68, 0.1);
-      border: 1px solid #ef4444;
-      border-radius: 4px;
+    .btn-primary, .btn-secondary {
+      flex: 1; padding: 10px;
+      border-radius: var(--radius-sm);
+      border: none;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #2563eb; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--surface-hover); }
+
+    .msg-error {
+      padding: 10px 12px;
+      background: var(--red-dim);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: var(--radius-sm);
       color: #fca5a5;
-      font-size: 13px;
-      margin-bottom: 16px;
+      font-size: 12px;
+      margin-bottom: 14px;
     }
-
-    .success-message {
-      padding: 12px;
-      background: rgba(34, 197, 94, 0.1);
-      border: 1px solid #22c55e;
-      border-radius: 4px;
+    .msg-success {
+      padding: 10px 12px;
+      background: var(--green-dim);
+      border: 1px solid rgba(34,197,94,0.3);
+      border-radius: var(--radius-sm);
       color: #86efac;
-      font-size: 13px;
-      margin-bottom: 16px;
+      font-size: 12px;
+      margin-bottom: 14px;
     }
 
-    .loading {
-      display: inline-block;
-      width: 4px;
-      height: 4px;
-      background: currentColor;
-      border-radius: 50%;
-      animation: pulse 1.5s infinite;
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* ── Responsive ── */
+    @media (max-width: 1100px) {
+      .content-area { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
     }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 0.6; }
-      50% { opacity: 1; }
-    }
-
-    /* Scrollbar styling */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-
-    ::-webkit-scrollbar-track {
-      background: transparent;
-    }
-
-    ::-webkit-scrollbar-thumb {
-      background: #374151;
-      border-radius: 4px;
-    }
-
-    ::-webkit-scrollbar-thumb:hover {
-      background: #4b5563;
-    }
-
-    /* Responsive */
-    @media (max-width: 1200px) {
-      .content-area {
-        grid-template-columns: 1fr;
-      }
-
-      .sidebar {
-        display: none;
-      }
-    }
-
-    @media (max-width: 768px) {
-      .header {
-        padding: 16px;
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      .header-title {
-        font-size: 24px;
-      }
-
-      .card-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .modal {
-        max-width: 90%;
-      }
-
-      .sidebar-panel {
-        width: 100%;
-      }
+    @media (max-width: 700px) {
+      .header { padding: 12px 16px; }
+      .header-title { font-size: 18px; }
+      .card-grid { grid-template-columns: 1fr; }
+      .sidebar-panel { width: 100%; }
+      .detail-modal { max-width: 95%; }
     }
   </style>
 </head>
@@ -771,8 +580,9 @@
   <div class="app">
     <div class="header">
       <div class="header-title">Rockwell Second Brain</div>
-      <div class="header-controls">
-        <div class="auth-status" id="authStatus">Not authenticated</div>
+      <div id="statusBadge" class="status-badge">
+        <div class="status-dot"></div>
+        <span id="statusText">Locked</span>
       </div>
     </div>
 
@@ -793,7 +603,7 @@
             </div>
             <div class="filter-divider"></div>
             <div class="importance-filter">
-              <label>Min Importance:</label>
+              <label>Min:</label>
               <select id="importanceFilter" class="importance-select">
                 <option value="0">All</option>
                 <option value="1">1+</option>
@@ -807,20 +617,15 @@
         </div>
 
         <div class="search-container">
-          <input
-            type="text"
-            id="keywordSearch"
-            class="search-input"
-            placeholder="Keyword search (real-time)..."
-          >
+          <input type="text" id="keywordSearch" class="search-input" placeholder="Search knowledge base...">
           <button id="semanticSearchBtn" class="search-semantic">Semantic</button>
         </div>
 
         <div class="grid-container">
           <div class="card-grid" id="cardGrid">
             <div class="empty-state">
-              <div class="empty-state-icon">◈</div>
-              <div class="empty-state-text">Loading knowledge base...</div>
+              <div class="empty-icon">◈</div>
+              <div class="empty-text">Loading...</div>
             </div>
           </div>
         </div>
@@ -833,11 +638,11 @@
         <div class="sidebar-title">Statistics</div>
         <div class="stats" id="stats">
           <div class="stat">
-            <span>Total entries</span>
+            <span class="stat-label"><span class="stat-dot" style="background:#3b82f6"></span>Total</span>
             <span class="stat-value" id="totalCount">—</span>
           </div>
           <div class="stat">
-            <span>With embeddings</span>
+            <span class="stat-label"><span class="stat-dot" style="background:#a855f7"></span>Embedded</span>
             <span class="stat-value" id="embeddedCount">—</span>
           </div>
         </div>
@@ -845,25 +650,44 @@
     </div>
   </div>
 
-  <!-- Card Detail Modal -->
-  <div class="modal-overlay" id="cardModal">
+  <!-- Unlock Modal -->
+  <div class="modal-overlay" id="unlockModal">
     <div class="modal">
-      <div class="modal-header">
-        <h2 class="modal-title" id="modalTitle">Entry Details</h2>
-        <button class="modal-close" id="modalClose">&times;</button>
+      <div class="modal-header" style="flex-direction:column;align-items:flex-start;gap:4px;">
+        <div class="modal-title">🔒 Unlock Dashboard</div>
+        <div class="modal-subtitle">Enter your Dashboard Secret to continue</div>
       </div>
-      <div id="modalContent"></div>
+      <div id="unlockMessage"></div>
+      <div class="form-group">
+        <label class="form-label">Dashboard Secret</label>
+        <input type="password" id="unlockInput" class="form-input" placeholder="Enter secret…" autofocus>
+      </div>
+      <div class="form-actions">
+        <button id="unlockBtn" class="btn-primary">Unlock</button>
+      </div>
     </div>
   </div>
 
-  <!-- New Entry Sidebar Panel -->
-  <div class="sidebar-panel" id="newEntryPanel">
+  <!-- Card Detail Modal -->
+  <div class="detail-overlay" id="detailModal">
+    <div class="detail-modal">
+      <div class="detail-header">
+        <div class="detail-title" id="detailTitle"></div>
+        <button class="modal-close" id="detailClose">&times;</button>
+      </div>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <!-- Entry Side Panel (add + edit) -->
+  <div class="sidebar-panel" id="entryPanel">
     <div class="panel-header">
-      <h3 style="font-family: 'Clash Display', sans-serif; font-size: 18px;">New Entry</h3>
+      <div class="panel-title" id="panelTitle">New Entry</div>
       <button class="panel-close" id="panelClose">&times;</button>
     </div>
     <div class="panel-content">
-      <form id="newEntryForm">
+      <form id="entryForm">
+        <input type="hidden" name="entryId">
         <div id="formMessage"></div>
 
         <div class="form-group">
@@ -880,7 +704,7 @@
           <div class="form-group">
             <label class="form-label">Category *</label>
             <select name="category" class="form-select" required>
-              <option value="">Select category</option>
+              <option value="">Select…</option>
               <option value="decision">Decision</option>
               <option value="contact">Contact</option>
               <option value="lesson">Lesson</option>
@@ -891,7 +715,6 @@
               <option value="daily_note">Daily Note</option>
             </select>
           </div>
-
           <div class="form-group">
             <label class="form-label">Importance</label>
             <select name="importance" class="form-select">
@@ -906,409 +729,440 @@
 
         <div class="form-group">
           <label class="form-label">Tags (comma-separated)</label>
-          <input type="text" name="tags" class="form-input" placeholder="tag1, tag2, tag3">
+          <input type="text" name="tags" class="form-input" placeholder="tag1, tag2">
         </div>
 
         <div class="form-group">
           <label class="form-label">Source</label>
-          <input type="text" name="source" class="form-input" placeholder="Optional: where this came from">
-        </div>
-
-        <div class="form-group">
-          <label class="form-label">Dashboard Secret *</label>
-          <input type="password" name="secret" class="form-input" placeholder="Enter DASHBOARD_SECRET" required>
+          <input type="text" name="source" class="form-input" placeholder="Optional">
         </div>
 
         <div class="form-actions">
-          <button type="submit" class="btn-submit">Create Entry</button>
-          <button type="button" class="btn-cancel" id="panelCancel">Cancel</button>
+          <button type="submit" class="btn-primary" id="formSubmitBtn">Create Entry</button>
+          <button type="button" class="btn-secondary" id="panelCancel">Cancel</button>
         </div>
       </form>
     </div>
   </div>
 
   <script>
-    // ===== Configuration =====
-    const SUPABASE_URL = 'https://kihzwozrqcoqjkwvoxjg.supabase.co';
-    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHp3b3pycWNvcWprd3ZveGpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1Mzk1MDEsImV4cCI6MjA4NzExNTUwMX0.6JYyuKiol8wMuOxw-i0JiDyOm6oZQz2z0hu9SAj8qLU';
-    const ADD_ENTRY_FUNCTION_URL = 'https://kihzwozrqcoqjkwvoxjg.supabase.co/functions/v1/add-entry';
+    // ── Config ────────────────────────────────────────────────────────────────
+    const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHp3b3pycWNvcWprd3ZveGpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1Mzk1MDEsImV4cCI6MjA4NzExNTUwMX0.6JYyuKiol8wMuOxw-i0JiDyOm6oZQz2z0hu9SAj8qLU';
+    const GATEWAY_URL = 'https://kihzwozrqcoqjkwvoxjg.supabase.co/functions/v1/gateway';
 
-    const categoryColors = {
-      decision: '#3b82f6',
-      contact: '#22c55e',
-      lesson: '#f59e0b',
-      open_thread: '#ef4444',
-      vendor: '#a855f7',
-      client: '#06b6d4',
-      strategy: '#6366f1',
-      daily_note: '#6b7280'
+    const CATEGORY_COLORS = {
+      decision:'#3b82f6', contact:'#22c55e', lesson:'#f59e0b',
+      open_thread:'#ef4444', vendor:'#a855f7', client:'#06b6d4',
+      strategy:'#6366f1', daily_note:'#6b7280'
+    };
+    const CATEGORY_LABELS = {
+      decision:'Decision', contact:'Contact', lesson:'Lesson',
+      open_thread:'Open Thread', vendor:'Vendor', client:'Client',
+      strategy:'Strategy', daily_note:'Daily Note'
     };
 
-    const categoryLabels = {
-      decision: 'Decision',
-      contact: 'Contact',
-      lesson: 'Lesson',
-      open_thread: 'Open Thread',
-      vendor: 'Vendor',
-      client: 'Client',
-      strategy: 'Strategy',
-      daily_note: 'Daily Note'
-    };
-
-    // ===== State =====
-    let db = null;
+    // ── State ─────────────────────────────────────────────────────────────────
+    let secret = localStorage.getItem('dashboardSecret') || '';
     let allEntries = [];
-    let filteredEntries = [];
     let currentFilter = { category: 'all', importance: 0 };
-    let currentKeywordSearch = '';
-    let isSemanticSearch = false;
-    let dashboardSecret = localStorage.getItem('dashboardSecret') || '';
+    let currentKeyword = '';
 
-    // ===== Initialize Supabase =====
-    async function initSupabase() {
-      db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-      updateAuthStatus();
-      loadEntries();
+    // ── Gateway helper ────────────────────────────────────────────────────────
+    async function callGateway(action, payload = {}) {
+      const res = await fetch(GATEWAY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'X-Dashboard-Secret': secret,
+        },
+        body: JSON.stringify({ action, ...payload }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw Object.assign(new Error(err.error || 'Request failed'), { status: res.status });
+      }
+      return res.json();
     }
 
-    function updateAuthStatus() {
-      const status = document.getElementById('authStatus');
-      if (db) {
-        status.textContent = 'Connected';
-        status.classList.add('authed');
+    // ── Unlock flow ───────────────────────────────────────────────────────────
+    function setStatus(unlocked) {
+      const badge = document.getElementById('statusBadge');
+      const text  = document.getElementById('statusText');
+      if (unlocked) {
+        badge.classList.add('unlocked');
+        text.textContent = 'Unlocked';
+      } else {
+        badge.classList.remove('unlocked');
+        text.textContent = 'Locked';
       }
     }
 
-    // ===== Load Entries =====
+    async function tryUnlock(inputSecret) {
+      const prev = secret;
+      secret = inputSecret;
+      try {
+        await callGateway('list');
+        localStorage.setItem('dashboardSecret', secret);
+        setStatus(true);
+        document.getElementById('unlockModal').classList.remove('show');
+        loadEntries();
+      } catch (err) {
+        secret = prev;
+        if (err.status === 401) {
+          showMsg('unlockMessage', 'Incorrect secret — try again.', 'error');
+        } else {
+          showMsg('unlockMessage', 'Connection error. Check console.', 'error');
+        }
+      }
+    }
+
+    document.getElementById('unlockBtn').addEventListener('click', () => {
+      const val = document.getElementById('unlockInput').value.trim();
+      if (val) tryUnlock(val);
+    });
+    document.getElementById('unlockInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('unlockBtn').click();
+    });
+
+    // ── Load entries ──────────────────────────────────────────────────────────
     async function loadEntries() {
       try {
-        const { data, error } = await db
-          .from('knowledge_entries')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
-
-        allEntries = data || [];
+        allEntries = await callGateway('list');
         updateStats();
         applyFilters();
       } catch (err) {
-        console.error('Failed to load entries:', err);
-        showEmptyState('Failed to load knowledge base');
+        console.error('loadEntries:', err);
+        showEmptyState('Failed to load — check console');
       }
     }
 
-    // ===== Filtering & Search =====
+    // ── Filters ───────────────────────────────────────────────────────────────
     function applyFilters() {
-      let filtered = [...allEntries];
-
-      // Category filter
-      if (currentFilter.category !== 'all') {
-        filtered = filtered.filter(e => e.category === currentFilter.category);
-      }
-
-      // Importance filter
-      if (currentFilter.importance > 0) {
-        filtered = filtered.filter(e => e.importance >= currentFilter.importance);
-      }
-
-      // Keyword search
-      if (currentKeywordSearch.trim()) {
-        const q = currentKeywordSearch.toLowerCase();
-        filtered = filtered.filter(e =>
+      let out = [...allEntries];
+      if (currentFilter.category !== 'all') out = out.filter(e => e.category === currentFilter.category);
+      if (currentFilter.importance > 0) out = out.filter(e => e.importance >= currentFilter.importance);
+      if (currentKeyword.trim()) {
+        const q = currentKeyword.toLowerCase();
+        out = out.filter(e =>
           e.title.toLowerCase().includes(q) ||
           e.content.toLowerCase().includes(q) ||
-          (e.tags && e.tags.some(t => t.toLowerCase().includes(q)))
+          (e.tags || []).some(t => t.toLowerCase().includes(q))
         );
       }
-
-      filteredEntries = filtered;
-      renderGrid();
+      renderGrid(out);
     }
 
     async function semanticSearch() {
       const query = document.getElementById('keywordSearch').value.trim();
-      if (!query) {
-        showMessage('Please enter a search query', 'error', 'keywordSearch');
-        return;
-      }
-
+      if (!query) return;
       const btn = document.getElementById('semanticSearchBtn');
-      btn.classList.add('loading');
       btn.disabled = true;
-
+      btn.textContent = '…';
       try {
-        // Call search_knowledge RPC
-        const { data, error } = await db.rpc('search_knowledge', {
-          query_text: query,
-          query_embedding: null, // Frontend doesn't generate embeddings
-          match_count: 20
-        });
-
-        if (error) throw error;
-
-        filteredEntries = data || [];
-        isSemanticSearch = true;
-        renderGrid();
+        const results = await callGateway('search', { query });
+        renderGrid(results);
       } catch (err) {
-        console.error('Semantic search failed:', err);
-        showMessage('Semantic search unavailable (embeddings may still be processing)', 'error', 'cardGrid');
+        console.error('semanticSearch:', err);
       } finally {
-        btn.classList.remove('loading');
         btn.disabled = false;
+        btn.textContent = 'Semantic';
       }
     }
 
-    // ===== Rendering =====
-    function renderGrid() {
+    // ── Render ────────────────────────────────────────────────────────────────
+    function renderGrid(entries) {
       const grid = document.getElementById('cardGrid');
+      if (!entries.length) { showEmptyState('No entries found'); return; }
 
-      if (filteredEntries.length === 0) {
-        showEmptyState('No entries found');
-        return;
-      }
-
-      grid.innerHTML = filteredEntries.map(entry => `
-        <div class="card" data-category="${entry.category}" data-id="${entry.id}">
+      grid.innerHTML = entries.map(e => `
+        <div class="card" data-category="${e.category}" data-id="${e.id}">
+          <div class="card-actions">
+            <button class="card-action-btn edit" data-id="${e.id}" title="Edit">✏</button>
+            <button class="card-action-btn delete" data-id="${e.id}" title="Delete">🗑</button>
+          </div>
           <div class="card-header">
-            <div class="card-title">${escapeHtml(entry.title)}</div>
-            <div class="card-importance">${'★'.repeat(entry.importance)}</div>
+            <div class="card-title">${esc(e.title)}</div>
+            <div class="card-importance">${'★'.repeat(e.importance)}</div>
           </div>
           <div class="card-body">
-            <div class="card-content">${escapeHtml(entry.content)}</div>
+            <div class="card-content">${esc(e.content)}</div>
             <div class="card-meta">
-              <span class="card-category">${categoryLabels[entry.category]}</span>
-              <span class="card-time" data-time="${entry.created_at}">${formatTime(entry.created_at)}</span>
+              <span class="card-category">${CATEGORY_LABELS[e.category] || e.category}</span>
+              <span class="card-time">${fmtTime(e.created_at)}</span>
             </div>
           </div>
         </div>
       `).join('');
 
-      // Attach click handlers
+      // Click card body → detail modal (but not action buttons)
       grid.querySelectorAll('.card').forEach(card => {
-        card.addEventListener('click', () => showCardDetail(card.dataset.id));
+        card.addEventListener('click', (ev) => {
+          if (ev.target.closest('.card-actions, .delete-confirm')) return;
+          showDetail(card.dataset.id);
+        });
       });
 
-      // Update timeago
-      if (window.timeago) {
-        window.timeago.render(grid.querySelectorAll('.card-time'));
-      }
+      // Edit buttons
+      grid.querySelectorAll('.card-action-btn.edit').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          openEditPanel(btn.dataset.id);
+        });
+      });
+
+      // Delete buttons — inline confirm
+      grid.querySelectorAll('.card-action-btn.delete').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          showDeleteConfirm(btn.dataset.id, btn.closest('.card'));
+        });
+      });
     }
 
-    function showEmptyState(message) {
+    function showEmptyState(msg) {
       document.getElementById('cardGrid').innerHTML = `
         <div class="empty-state">
-          <div class="empty-state-icon">◈</div>
-          <div class="empty-state-text">${message}</div>
-        </div>
-      `;
-    }
-
-    function showCardDetail(entryId) {
-      const entry = allEntries.find(e => e.id === entryId);
-      if (!entry) return;
-
-      const modal = document.getElementById('cardModal');
-      const title = document.getElementById('modalTitle');
-      const content = document.getElementById('modalContent');
-
-      title.textContent = entry.title;
-      content.innerHTML = `
-        <div style="color: #d1d5db;">
-          <div style="margin-bottom: 16px;">
-            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Category</div>
-            <div style="padding: 6px 10px; background: ${categoryColors[entry.category]}20; border-left: 2px solid ${categoryColors[entry.category]}; border-radius: 2px;">
-              ${categoryLabels[entry.category]}
-            </div>
-          </div>
-          <div style="margin-bottom: 16px;">
-            <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Importance</div>
-            <div style="font-size: 16px;">${'★'.repeat(entry.importance)}${'☆'.repeat(5 - entry.importance)}</div>
-          </div>
-          ${entry.tags && entry.tags.length > 0 ? `
-            <div style="margin-bottom: 16px;">
-              <div style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">Tags</div>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                ${entry.tags.map(tag => `
-                  <span style="padding: 4px 8px; background: #1f2937; border-radius: 3px; font-size: 12px;">
-                    ${escapeHtml(tag)}
-                  </span>
-                `).join('')}
-              </div>
-            </div>
-          ` : ''}
-          <div style="margin-bottom: 16px;">
-            <div style="font-size: 12px; color: #6b7280; margin-bottom: 8px;">Content</div>
-            <div style="white-space: pre-wrap; line-height: 1.6;">${escapeHtml(entry.content)}</div>
-          </div>
-          ${entry.source ? `
-            <div style="margin-bottom: 16px;">
-              <div style="font-size: 12px; color: #6b7280; margin-bottom: 4px;">Source</div>
-              <div style="color: #9ca3af;">${escapeHtml(entry.source)}</div>
-            </div>
-          ` : ''}
-          <div style="font-size: 11px; color: #4b5563; padding-top: 16px; border-top: 1px solid #1f2937;">
-            Created ${formatTime(entry.created_at)}
-          </div>
-        </div>
-      `;
-
-      modal.classList.add('show');
+          <div class="empty-icon">◈</div>
+          <div class="empty-text">${esc(msg)}</div>
+        </div>`;
     }
 
     function updateStats() {
-      const total = allEntries.length;
-      const embedded = allEntries.filter(e => e.embedding !== null).length;
-
-      document.getElementById('totalCount').textContent = total;
-      document.getElementById('embeddedCount').textContent = embedded;
+      document.getElementById('totalCount').textContent = allEntries.length;
+      document.getElementById('embeddedCount').textContent = allEntries.filter(e => e.embedding !== null).length;
     }
 
-    // ===== Event Listeners =====
-    document.getElementById('categoryTabs').addEventListener('click', (e) => {
-      if (e.target.classList.contains('tab')) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        e.target.classList.add('active');
-        currentFilter.category = e.target.dataset.category;
-        isSemanticSearch = false;
-        document.getElementById('keywordSearch').value = '';
+    // ── Detail modal ──────────────────────────────────────────────────────────
+    function showDetail(id) {
+      const e = allEntries.find(x => x.id === id);
+      if (!e) return;
+      document.getElementById('detailTitle').textContent = e.title;
+      document.getElementById('detailContent').innerHTML = `
+        <div style="color:var(--text-dim);font-size:13px;line-height:1.6;">
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">CATEGORY</div>
+            <span style="padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;
+              background:${CATEGORY_COLORS[e.category]}18;
+              border:1px solid ${CATEGORY_COLORS[e.category]}44;
+              color:${CATEGORY_COLORS[e.category]};">
+              ${CATEGORY_LABELS[e.category]}
+            </span>
+          </div>
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">IMPORTANCE</div>
+            <span style="color:var(--amber);font-size:16px;">${'★'.repeat(e.importance)}${'☆'.repeat(5-e.importance)}</span>
+          </div>
+          ${e.tags && e.tags.length ? `
+            <div style="margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">TAGS</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                ${e.tags.map(t => `<span style="padding:3px 8px;border-radius:10px;background:var(--surface-hover);font-size:11px;">${esc(t)}</span>`).join('')}
+              </div>
+            </div>` : ''}
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">CONTENT</div>
+            <div style="white-space:pre-wrap;">${esc(e.content)}</div>
+          </div>
+          ${e.source ? `
+            <div style="margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">SOURCE</div>
+              <div>${esc(e.source)}</div>
+            </div>` : ''}
+          <div style="font-size:11px;color:var(--text-muted);padding-top:14px;border-top:1px solid var(--border);">
+            Created ${fmtTime(e.created_at)}
+          </div>
+        </div>`;
+      document.getElementById('detailModal').classList.add('show');
+    }
+
+    document.getElementById('detailClose').addEventListener('click', () =>
+      document.getElementById('detailModal').classList.remove('show'));
+    document.getElementById('detailModal').addEventListener('click', (e) => {
+      if (e.target.id === 'detailModal') document.getElementById('detailModal').classList.remove('show');
+    });
+
+    // ── Inline delete confirm ─────────────────────────────────────────────────
+    function showDeleteConfirm(id, card) {
+      // Replace action buttons with mini-confirm
+      const actions = card.querySelector('.card-actions');
+      actions.style.display = 'none';
+      const confirm = document.createElement('div');
+      confirm.className = 'delete-confirm';
+      confirm.innerHTML = `
+        <span style="font-size:11px;color:var(--text-muted);">Delete?</span>
+        <button class="confirm-yes" title="Yes, delete">✓</button>
+        <button class="confirm-no" title="Cancel">✗</button>`;
+      card.appendChild(confirm);
+
+      confirm.querySelector('.confirm-no').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        confirm.remove();
+        actions.style.display = '';
+      });
+
+      confirm.querySelector('.confirm-yes').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        try {
+          await callGateway('delete', { id });
+          allEntries = allEntries.filter(e => e.id !== id);
+          updateStats();
+          applyFilters();
+        } catch (err) {
+          console.error('delete failed:', err);
+          confirm.remove();
+          actions.style.display = '';
+        }
+      });
+    }
+
+    // ── Entry panel (add + edit) ──────────────────────────────────────────────
+    function openAddPanel() {
+      document.getElementById('panelTitle').textContent = 'New Entry';
+      document.getElementById('formSubmitBtn').textContent = 'Create Entry';
+      document.getElementById('entryForm').reset();
+      document.querySelector('input[name="entryId"]').value = '';
+      document.getElementById('formMessage').innerHTML = '';
+      document.getElementById('entryPanel').classList.add('show');
+    }
+
+    function openEditPanel(id) {
+      const e = allEntries.find(x => x.id === id);
+      if (!e) return;
+      document.getElementById('panelTitle').textContent = 'Edit Entry';
+      document.getElementById('formSubmitBtn').textContent = 'Save Changes';
+      document.getElementById('formMessage').innerHTML = '';
+
+      const f = document.getElementById('entryForm');
+      f.querySelector('[name="entryId"]').value = e.id;
+      f.querySelector('[name="title"]').value = e.title;
+      f.querySelector('[name="content"]').value = e.content;
+      f.querySelector('[name="category"]').value = e.category;
+      f.querySelector('[name="importance"]').value = String(e.importance);
+      f.querySelector('[name="tags"]').value = (e.tags || []).join(', ');
+      f.querySelector('[name="source"]').value = e.source || '';
+
+      document.getElementById('entryPanel').classList.add('show');
+    }
+
+    function closePanel() {
+      document.getElementById('entryPanel').classList.remove('show');
+    }
+
+    document.getElementById('newEntryBtn').addEventListener('click', openAddPanel);
+    document.getElementById('panelClose').addEventListener('click', closePanel);
+    document.getElementById('panelCancel').addEventListener('click', closePanel);
+
+    document.getElementById('entryForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const id = fd.get('entryId');
+      const isEdit = !!id;
+      const tags = fd.get('tags').split(',').map(t => t.trim()).filter(Boolean);
+
+      const btn = document.getElementById('formSubmitBtn');
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = isEdit ? 'Saving…' : 'Creating…';
+
+      try {
+        if (isEdit) {
+          const updated = await callGateway('update', {
+            id,
+            title: fd.get('title'),
+            content: fd.get('content'),
+            category: fd.get('category'),
+            importance: parseInt(fd.get('importance')),
+            tags,
+            source: fd.get('source') || null,
+          });
+          // Update in local state
+          const idx = allEntries.findIndex(x => x.id === id);
+          if (idx !== -1) allEntries[idx] = { ...allEntries[idx], ...updated };
+        } else {
+          const created = await callGateway('add', {
+            title: fd.get('title'),
+            content: fd.get('content'),
+            category: fd.get('category'),
+            importance: parseInt(fd.get('importance')),
+            tags,
+            source: fd.get('source') || null,
+          });
+          // Reload to get full entry
+          await loadEntries();
+        }
+        showMsg('formMessage', isEdit ? 'Entry updated!' : 'Entry created!', 'success');
+        setTimeout(closePanel, 1200);
+        updateStats();
         applyFilters();
+      } catch (err) {
+        showMsg('formMessage', err.message || 'Something went wrong', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
       }
+    });
+
+    // ── Filter & search events ────────────────────────────────────────────────
+    document.getElementById('categoryTabs').addEventListener('click', (e) => {
+      if (!e.target.classList.contains('tab')) return;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      e.target.classList.add('active');
+      currentFilter.category = e.target.dataset.category;
+      currentKeyword = '';
+      document.getElementById('keywordSearch').value = '';
+      applyFilters();
     });
 
     document.getElementById('importanceFilter').addEventListener('change', (e) => {
       currentFilter.importance = parseInt(e.target.value);
-      isSemanticSearch = false;
       applyFilters();
     });
 
     document.getElementById('keywordSearch').addEventListener('input', (e) => {
-      currentKeywordSearch = e.target.value;
-      isSemanticSearch = false;
+      currentKeyword = e.target.value;
       applyFilters();
     });
 
     document.getElementById('keywordSearch').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        semanticSearch();
-      }
+      if (e.key === 'Enter') semanticSearch();
     });
 
     document.getElementById('semanticSearchBtn').addEventListener('click', semanticSearch);
 
-    // Modal controls
-    document.getElementById('modalClose').addEventListener('click', () => {
-      document.getElementById('cardModal').classList.remove('show');
-    });
+    // ── Utilities ─────────────────────────────────────────────────────────────
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str || '';
+      return d.innerHTML;
+    }
 
-    document.getElementById('cardModal').addEventListener('click', (e) => {
-      if (e.target.id === 'cardModal') {
-        document.getElementById('cardModal').classList.remove('show');
+    function fmtTime(iso) {
+      const d = new Date(iso), now = new Date();
+      const s = Math.floor((now - d) / 1000);
+      if (s < 60)     return 'just now';
+      if (s < 3600)   return `${Math.floor(s/60)}m ago`;
+      if (s < 86400)  return `${Math.floor(s/3600)}h ago`;
+      if (s < 604800) return `${Math.floor(s/86400)}d ago`;
+      return d.toLocaleDateString();
+    }
+
+    function showMsg(targetId, message, type) {
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      el.innerHTML = `<div class="msg-${type}">${esc(message)}</div>`;
+      if (type === 'success') setTimeout(() => el.innerHTML = '', 3000);
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      if (secret) {
+        setStatus(true);
+        loadEntries();
+      } else {
+        document.getElementById('unlockModal').classList.add('show');
       }
     });
-
-    // New entry panel
-    document.getElementById('newEntryBtn').addEventListener('click', () => {
-      document.getElementById('newEntryPanel').classList.add('show');
-      document.getElementById('newEntryForm').reset();
-      document.querySelector('input[name="secret"]').value = dashboardSecret;
-      document.getElementById('formMessage').innerHTML = '';
-    });
-
-    document.getElementById('panelClose').addEventListener('click', () => {
-      document.getElementById('newEntryPanel').classList.remove('show');
-    });
-
-    document.getElementById('panelCancel').addEventListener('click', () => {
-      document.getElementById('newEntryPanel').classList.remove('show');
-    });
-
-    document.getElementById('newEntryForm').addEventListener('submit', submitNewEntry);
-
-    async function submitNewEntry(e) {
-      e.preventDefault();
-
-      const formData = new FormData(e.target);
-      const secret = formData.get('secret');
-      const tags = formData.get('tags')
-        .split(',')
-        .map(t => t.trim())
-        .filter(t => t);
-
-      // Store secret
-      dashboardSecret = secret;
-      localStorage.setItem('dashboardSecret', secret);
-
-      const btn = e.target.querySelector('.btn-submit');
-      btn.disabled = true;
-      const originalText = btn.textContent;
-      btn.textContent = 'Creating...';
-
-      try {
-        const response = await fetch(ADD_ENTRY_FUNCTION_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            secret,
-            title: formData.get('title'),
-            content: formData.get('content'),
-            category: formData.get('category'),
-            tags,
-            importance: parseInt(formData.get('importance')),
-            source: formData.get('source') || null
-          })
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.error || 'Failed to create entry');
-        }
-
-        showMessage('Entry created successfully!', 'success', 'formMessage');
-        setTimeout(() => {
-          document.getElementById('newEntryPanel').classList.remove('show');
-          loadEntries();
-        }, 1500);
-      } catch (err) {
-        console.error('Failed to create entry:', err);
-        showMessage(err.message || 'Failed to create entry', 'error', 'formMessage');
-      } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-      }
-    }
-
-    // ===== Utilities =====
-    function formatTime(isoString) {
-      const date = new Date(isoString);
-      const now = new Date();
-      const seconds = Math.floor((now - date) / 1000);
-
-      if (seconds < 60) return 'just now';
-      if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-      if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-      if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-
-      return date.toLocaleDateString();
-    }
-
-    function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.textContent = text;
-      return div.innerHTML;
-    }
-
-    function showMessage(message, type, targetId) {
-      const target = document.getElementById(targetId);
-      const className = type === 'success' ? 'success-message' : 'error-message';
-      target.innerHTML = `<div class="${className}">${message}</div>`;
-      if (type === 'success') {
-        setTimeout(() => target.innerHTML = '', 3000);
-      }
-    }
-
-    // ===== Init =====
-    window.addEventListener('DOMContentLoaded', initSupabase);
   </script>
 </body>
 </html>
