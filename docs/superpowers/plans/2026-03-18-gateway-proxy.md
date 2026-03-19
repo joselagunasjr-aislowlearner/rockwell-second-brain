@@ -1,0 +1,1539 @@
+# Gateway Proxy Implementation Plan
+
+> **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace direct Supabase anon-key DB queries with a single secure Edge Function gateway; add edit/delete to the dashboard; modernise the UI.
+
+**Architecture:** A single Deno Edge Function (`gateway`) validates `X-Dashboard-Secret` on every request and uses the service role key (env secret, never committed) to read/write `knowledge_entries`. The dashboard calls only the gateway — no direct DB access. RLS stays ON with zero policies so the anon key cannot touch any data.
+
+**Tech Stack:** Deno 1.x, TypeScript, Supabase JS v2 (ESM), Supabase CLI, vanilla JS, GitHub Pages
+
+**Spec:** `docs/superpowers/specs/2026-03-18-gateway-proxy-design.md`
+
+---
+
+## Chunk 1: Gateway Edge Function
+
+### Task 1: Harden `.gitignore`
+
+**Files:**
+- Modify: `.gitignore`
+
+- [ ] **Step 1: Open `.gitignore` and append env exclusions**
+
+Add these lines to `.gitignore` (create the file if it doesn't exist):
+
+```
+# Secrets — never commit
+*.env
+.env
+.env.*
+.env.local
+supabase/.env
+supabase/functions/.env
+```
+
+- [ ] **Step 2: Verify no `.env` files are currently tracked**
+
+```bash
+git ls-files | grep -E '\.env'
+```
+
+Expected: no output. If any appear, run `git rm --cached <file>` for each.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add .gitignore
+git commit -m "chore: add env file exclusions to gitignore"
+```
+
+---
+
+### Task 2: Create the gateway Edge Function
+
+**Files:**
+- Create: `supabase/functions/gateway/index.ts`
+
+- [ ] **Step 1: Create the directory**
+
+```bash
+mkdir -p supabase/functions/gateway
+```
+
+- [ ] **Step 2: Write `supabase/functions/gateway/index.ts`**
+
+```typescript
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.38.4";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+const DASHBOARD_SECRET = Deno.env.get("DASHBOARD_SECRET");
+
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !DASHBOARD_SECRET) {
+  throw new Error("Missing required environment variables");
+}
+
+const ALLOWED_ORIGIN = "https://joselagunasjr-aislowlearner.github.io";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": ALLOWED_ORIGIN,
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Dashboard-Secret",
+};
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...corsHeaders },
+  });
+}
+
+Deno.serve(async (req: Request) => {
+  // CORS preflight
+  if (req.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: corsHeaders });
+  }
+
+  // Only POST allowed
+  if (req.method !== "POST") {
+    return json({ error: "Method not allowed" }, 405);
+  }
+
+  // Validate secret — reject before any DB work
+  const secret = req.headers.get("X-Dashboard-Secret");
+  if (!secret || secret !== DASHBOARD_SECRET) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
+  // Parse body
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { action } = body;
+  const db = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  try {
+    switch (action) {
+
+      // ── LIST ──────────────────────────────────────────────────────────────
+      case "list": {
+        const { data, error } = await db
+          .from("knowledge_entries")
+          .select("*")
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        return json(data ?? []);
+      }
+
+      // ── ADD ───────────────────────────────────────────────────────────────
+      case "add": {
+        const { title, content, category, tags, importance, source } = body;
+        if (!title || !content || !category) {
+          return json({ error: "Missing required fields: title, content, category" }, 400);
+        }
+        const { data, error } = await db
+          .from("knowledge_entries")
+          .insert({
+            title,
+            content,
+            category,
+            tags: tags ?? [],
+            importance: importance ?? 3,
+            source: source ?? null,
+          })
+          .select("id, created_at")
+          .single();
+        if (error) throw error;
+        return json(data, 201);
+      }
+
+      // ── UPDATE ────────────────────────────────────────────────────────────
+      case "update": {
+        const { id } = body;
+        if (!id) return json({ error: "Missing required field: id" }, 400);
+        const allowed = ["title", "content", "category", "tags", "importance", "source"];
+        const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+        for (const key of allowed) {
+          if (key in body) patch[key] = body[key];
+        }
+        const { data, error } = await db
+          .from("knowledge_entries")
+          .update(patch)
+          .eq("id", id)
+          .select()
+          .single();
+        if (error) throw error;
+        return json(data);
+      }
+
+      // ── DELETE ────────────────────────────────────────────────────────────
+      case "delete": {
+        const { id } = body;
+        if (!id) return json({ error: "Missing required field: id" }, 400);
+        const { error } = await db
+          .from("knowledge_entries")
+          .delete()
+          .eq("id", id);
+        if (error) throw error;
+        return json({ success: true });
+      }
+
+      // ── SEARCH ────────────────────────────────────────────────────────────
+      case "search": {
+        const { query } = body;
+        if (!query) return json({ error: "Missing required field: query" }, 400);
+        const { data, error } = await db.rpc("search_knowledge", {
+          query_embedding: null,
+          query_text: query,
+          match_count: 20,
+        });
+        if (error) throw error;
+        return json(data ?? []);
+      }
+
+      default:
+        return json({ error: "Unknown action" }, 400);
+    }
+  } catch (err) {
+    console.error(
+      `[gateway] action=${String(action)} error:`,
+      err instanceof Error ? err.message : String(err),
+    );
+    return json({ error: "Internal server error" }, 500);
+  }
+});
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add supabase/functions/gateway/index.ts
+git commit -m "feat: add gateway Edge Function — single proxy for all DB operations"
+```
+
+---
+
+### Task 3: Set Supabase secrets and deploy gateway
+
+> ⚠️ Run these commands in your terminal. Values never touch any file.
+
+- [ ] **Step 1: Set the three required secrets via CLI**
+
+```bash
+supabase secrets set \
+  DASHBOARD_SECRET=<your-secret-here> \
+  SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key> \
+  SUPABASE_URL=https://kihzwozrqcoqjkwvoxjg.supabase.co
+```
+
+Expected output: `Finished supabase secrets set.`
+
+- [ ] **Step 2: Deploy the gateway function**
+
+```bash
+supabase functions deploy gateway --project-ref kihzwozrqcoqjkwvoxjg
+```
+
+Expected: `Deployed Edge Function gateway`
+
+- [ ] **Step 3: Smoke test — wrong secret returns 401**
+
+```bash
+curl -s -X POST \
+  https://kihzwozrqcoqjkwvoxjg.supabase.co/functions/v1/gateway \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHp3b3pycWNvcWprd3ZveGpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1Mzk1MDEsImV4cCI6MjA4NzExNTUwMX0.6JYyuKiol8wMuOxw-i0JiDyOm6oZQz2z0hu9SAj8qLU" \
+  -H "Content-Type: application/json" \
+  -H "X-Dashboard-Secret: wrongsecret" \
+  -d '{"action":"list"}'
+```
+
+Expected: `{"error":"Unauthorized"}`
+
+- [ ] **Step 4: Smoke test — correct secret returns entries**
+
+```bash
+curl -s -X POST \
+  https://kihzwozrqcoqjkwvoxjg.supabase.co/functions/v1/gateway \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHp3b3pycWNvcWprd3ZveGpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1Mzk1MDEsImV4cCI6MjA4NzExNTUwMX0.6JYyuKiol8wMuOxw-i0JiDyOm6oZQz2z0hu9SAj8qLU" \
+  -H "Content-Type: application/json" \
+  -H "X-Dashboard-Secret: <your-secret-here>" \
+  -d '{"action":"list"}' | head -c 200
+```
+
+Expected: JSON array starting with `[{"id":"...`  (187 entries)
+
+---
+
+## Chunk 2: Dashboard Rewrite
+
+### Task 4: Replace `index.html` with gateway-backed, modernised dashboard
+
+**Files:**
+- Modify: `index.html` (full rewrite of `<style>` and `<script>` blocks; HTML structure updated)
+
+This is the largest task. Replace the entire `index.html` with the version below. Read the current file first to confirm you have the right one (`git show HEAD:index.html | head -5` should show `<!DOCTYPE html>`).
+
+- [ ] **Step 1: Replace `index.html`**
+
+Write the following as the complete `index.html`:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Rockwell Second Brain</title>
+  <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #080b10;
+      --surface: rgba(255,255,255,0.04);
+      --surface-hover: rgba(255,255,255,0.07);
+      --border: rgba(255,255,255,0.08);
+      --border-bright: rgba(255,255,255,0.15);
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --blue: #3b82f6;
+      --blue-dim: rgba(59,130,246,0.15);
+      --green: #22c55e;
+      --green-dim: rgba(34,197,94,0.12);
+      --amber: #f59e0b;
+      --red: #ef4444;
+      --red-dim: rgba(239,68,68,0.12);
+      --purple: #a855f7;
+      --cyan: #06b6d4;
+      --indigo: #6366f1;
+      --slate: #6b7280;
+      --radius: 8px;
+      --radius-sm: 5px;
+      --shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+
+    html, body { height: 100%; font-family: 'Inter', system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    body { overflow: hidden; }
+
+    /* ── Layout ── */
+    .app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+
+    .header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,11,16,0.95);
+      backdrop-filter: blur(12px);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 24px;
+      position: sticky; top: 0; z-index: 10;
+    }
+
+    .header-title {
+      font-family: 'Clash Display', sans-serif;
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(135deg, #fff 0%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 500;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text-muted);
+      transition: all 0.2s;
+    }
+
+    .status-badge.unlocked {
+      border-color: rgba(34,197,94,0.3);
+      background: var(--green-dim);
+      color: var(--green);
+    }
+
+    .status-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .content-area {
+      display: grid;
+      grid-template-columns: 1fr 220px;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Filters ── */
+    .filters-bar {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,11,16,0.8);
+    }
+
+    .filter-group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+    .category-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .tab {
+      padding: 5px 11px;
+      border-radius: 20px;
+      border: 1px solid transparent;
+      background: var(--surface);
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .tab:hover { background: var(--surface-hover); color: var(--text-dim); border-color: var(--border); }
+    .tab.active { color: #fff; border-color: var(--blue); background: var(--blue-dim); }
+    .tab.active[data-category="contact"]     { border-color: var(--green);  background: var(--green-dim); }
+    .tab.active[data-category="lesson"]      { border-color: var(--amber);  background: rgba(245,158,11,0.12); }
+    .tab.active[data-category="open_thread"] { border-color: var(--red);    background: var(--red-dim); }
+    .tab.active[data-category="vendor"]      { border-color: var(--purple); background: rgba(168,85,247,0.12); }
+    .tab.active[data-category="client"]      { border-color: var(--cyan);   background: rgba(6,182,212,0.12); }
+    .tab.active[data-category="strategy"]    { border-color: var(--indigo); background: rgba(99,102,241,0.12); }
+    .tab.active[data-category="daily_note"]  { border-color: var(--slate);  background: rgba(107,114,128,0.12); }
+
+    .filter-divider { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+
+    .importance-filter { display: flex; gap: 6px; align-items: center; }
+    .importance-filter label { font-size: 12px; color: var(--text-muted); }
+
+    .importance-select {
+      padding: 5px 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .importance-select:hover { border-color: var(--border-bright); }
+
+    /* ── Search ── */
+    .search-container {
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 9px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      color: var(--text);
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .search-input:focus {
+      outline: none;
+      border-color: var(--blue);
+      background: rgba(59,130,246,0.05);
+      box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+    }
+    .search-input::placeholder { color: var(--text-muted); }
+
+    .search-semantic {
+      padding: 9px 16px;
+      background: var(--blue);
+      border: none;
+      border-radius: 24px;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .search-semantic:hover { background: #2563eb; }
+    .search-semantic:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Cards ── */
+    .grid-container {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+    }
+
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      border-left: 3px solid var(--blue);
+      transition: all 0.2s ease-out;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      max-height: 230px;
+      position: relative;
+      backdrop-filter: blur(8px);
+    }
+    .card:hover {
+      border-color: var(--border-bright);
+      border-left-color: inherit;
+      background: var(--surface-hover);
+      transform: translateY(-3px);
+      box-shadow: var(--shadow);
+    }
+
+    .card[data-category="contact"]     { border-left-color: var(--green); }
+    .card[data-category="lesson"]      { border-left-color: var(--amber); }
+    .card[data-category="open_thread"] { border-left-color: var(--red); }
+    .card[data-category="vendor"]      { border-left-color: var(--purple); }
+    .card[data-category="client"]      { border-left-color: var(--cyan); }
+    .card[data-category="strategy"]    { border-left-color: var(--indigo); }
+    .card[data-category="daily_note"]  { border-left-color: var(--slate); }
+
+    /* Card action buttons — hidden until hover */
+    .card-actions {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .card:hover .card-actions { opacity: 1; }
+
+    .card-action-btn {
+      width: 26px; height: 26px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: rgba(8,11,16,0.9);
+      color: var(--text-dim);
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .card-action-btn:hover { border-color: var(--border-bright); color: var(--text); background: var(--surface-hover); }
+    .card-action-btn.delete:hover { border-color: var(--red); color: var(--red); background: var(--red-dim); }
+    .card-action-btn.edit:hover   { border-color: var(--blue); color: var(--blue); background: var(--blue-dim); }
+
+    /* Inline delete confirm */
+    .delete-confirm {
+      position: absolute;
+      top: 8px; right: 8px;
+      display: flex;
+      gap: 4px;
+      align-items: center;
+      background: rgba(8,11,16,0.95);
+      border: 1px solid rgba(239,68,68,0.4);
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 11px;
+      color: var(--text-dim);
+      backdrop-filter: blur(8px);
+    }
+    .delete-confirm span { margin-right: 4px; }
+    .confirm-yes, .confirm-no {
+      width: 22px; height: 22px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: none;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.15s;
+    }
+    .confirm-yes:hover { background: var(--red-dim); border-color: var(--red); color: var(--red); }
+    .confirm-no:hover  { background: var(--surface-hover); border-color: var(--border-bright); color: var(--text); }
+
+    .card-header {
+      padding: 11px 12px 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 32px; /* leave room for action buttons */
+    }
+
+    .card-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; line-height: 1.4; }
+    .card-importance { color: var(--amber); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+
+    .card-body { padding: 10px 12px; flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+    .card-content {
+      font-size: 12px;
+      color: var(--text-dim);
+      line-height: 1.5;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      flex: 1;
+    }
+
+    .card-meta {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .card-category {
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      background: var(--surface-hover);
+      color: var(--text-muted);
+    }
+
+    .card-time { color: var(--text-muted); font-size: 10px; }
+
+    /* ── Empty / Loading states ── */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 300px;
+      color: var(--text-muted);
+      gap: 12px;
+    }
+    .empty-icon { font-size: 40px; opacity: 0.3; }
+    .empty-text { font-size: 14px; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      border-left: 1px solid var(--border);
+      background: rgba(8,11,16,0.6);
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow: auto;
+    }
+
+    .sidebar-title {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    .new-entry-btn {
+      padding: 10px;
+      background: linear-gradient(135deg, var(--blue), #2563eb);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      width: 100%;
+    }
+    .new-entry-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(59,130,246,0.35); }
+
+    .stats { display: flex; flex-direction: column; gap: 4px; }
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-muted);
+      padding: 7px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+    }
+    .stat-label { display: flex; align-items: center; gap: 6px; }
+    .stat-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+    .stat-value { font-weight: 600; color: var(--text); font-size: 13px; }
+
+    /* ── Unlock Modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      backdrop-filter: blur(4px);
+    }
+    .modal-overlay.show { display: flex; }
+
+    .modal {
+      background: #0f1419;
+      border: 1px solid var(--border-bright);
+      border-radius: 12px;
+      padding: 28px;
+      width: 360px;
+      box-shadow: var(--shadow);
+      animation: slideUp 0.25s ease-out;
+    }
+
+    @keyframes slideUp {
+      from { transform: translateY(16px); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+    .modal-title { font-family: 'Clash Display', sans-serif; font-size: 18px; font-weight: 600; }
+    .modal-subtitle { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+    .modal-close {
+      background: none; border: none;
+      color: var(--text-muted); font-size: 22px; cursor: pointer; line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); }
+
+    /* ── Side Panel ── */
+    .sidebar-panel {
+      position: fixed;
+      top: 0; right: 0;
+      width: 380px;
+      height: 100vh;
+      background: #0d1117;
+      border-left: 1px solid var(--border);
+      z-index: 999;
+      transform: translateX(100%);
+      transition: transform 0.25s ease-out;
+      display: flex;
+      flex-direction: column;
+    }
+    .sidebar-panel.show { transform: translateX(0); }
+
+    .panel-header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .panel-title { font-family: 'Clash Display', sans-serif; font-size: 17px; font-weight: 600; }
+    .panel-close { background: none; border: none; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+    .panel-close:hover { color: var(--text); }
+    .panel-content { padding: 20px; flex: 1; overflow: auto; }
+
+    /* ── Detail Modal ── */
+    .detail-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 998;
+    }
+    .detail-overlay.show { display: flex; }
+    .detail-modal {
+      background: #0f1419;
+      border: 1px solid var(--border-bright);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 560px;
+      width: 90%;
+      max-height: 80vh;
+      overflow: auto;
+      box-shadow: var(--shadow);
+      animation: slideUp 0.25s ease-out;
+    }
+    .detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 18px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .detail-title { font-family: 'Clash Display', sans-serif; font-size: 18px; font-weight: 600; flex: 1; margin-right: 12px; }
+
+    /* ── Forms ── */
+    .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+    .form-label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+    .form-input, .form-textarea, .form-select {
+      padding: 9px 11px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      transition: all 0.15s;
+    }
+    .form-input:focus, .form-textarea:focus, .form-select:focus {
+      outline: none;
+      border-color: var(--blue);
+      background: rgba(59,130,246,0.05);
+      box-shadow: 0 0 0 2px rgba(59,130,246,0.1);
+    }
+    .form-textarea { resize: vertical; min-height: 110px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .form-actions {
+      display: flex; gap: 10px;
+      margin-top: 20px; padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+
+    .btn-primary, .btn-secondary {
+      flex: 1; padding: 10px;
+      border-radius: var(--radius-sm);
+      border: none;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .btn-primary { background: var(--blue); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #2563eb; }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: var(--surface-hover); }
+
+    .msg-error {
+      padding: 10px 12px;
+      background: var(--red-dim);
+      border: 1px solid rgba(239,68,68,0.3);
+      border-radius: var(--radius-sm);
+      color: #fca5a5;
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+    .msg-success {
+      padding: 10px 12px;
+      background: var(--green-dim);
+      border: 1px solid rgba(34,197,94,0.3);
+      border-radius: var(--radius-sm);
+      color: #86efac;
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+    /* ── Responsive ── */
+    @media (max-width: 1100px) {
+      .content-area { grid-template-columns: 1fr; }
+      .sidebar { display: none; }
+    }
+    @media (max-width: 700px) {
+      .header { padding: 12px 16px; }
+      .header-title { font-size: 18px; }
+      .card-grid { grid-template-columns: 1fr; }
+      .sidebar-panel { width: 100%; }
+      .detail-modal { max-width: 95%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="header-title">Rockwell Second Brain</div>
+      <div id="statusBadge" class="status-badge">
+        <div class="status-dot"></div>
+        <span id="statusText">Locked</span>
+      </div>
+    </div>
+
+    <div class="content-area">
+      <div class="main">
+        <div class="filters-bar">
+          <div class="filter-group">
+            <div class="category-tabs" id="categoryTabs">
+              <button class="tab active" data-category="all">All</button>
+              <button class="tab" data-category="decision">Decision</button>
+              <button class="tab" data-category="contact">Contact</button>
+              <button class="tab" data-category="lesson">Lesson</button>
+              <button class="tab" data-category="open_thread">Open Thread</button>
+              <button class="tab" data-category="vendor">Vendor</button>
+              <button class="tab" data-category="client">Client</button>
+              <button class="tab" data-category="strategy">Strategy</button>
+              <button class="tab" data-category="daily_note">Daily Note</button>
+            </div>
+            <div class="filter-divider"></div>
+            <div class="importance-filter">
+              <label>Min:</label>
+              <select id="importanceFilter" class="importance-select">
+                <option value="0">All</option>
+                <option value="1">1+</option>
+                <option value="2">2+</option>
+                <option value="3">3+</option>
+                <option value="4">4+</option>
+                <option value="5">5</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="search-container">
+          <input type="text" id="keywordSearch" class="search-input" placeholder="Search knowledge base...">
+          <button id="semanticSearchBtn" class="search-semantic">Semantic</button>
+        </div>
+
+        <div class="grid-container">
+          <div class="card-grid" id="cardGrid">
+            <div class="empty-state">
+              <div class="empty-icon">◈</div>
+              <div class="empty-text">Loading...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar">
+        <div class="sidebar-title">Quick Actions</div>
+        <button class="new-entry-btn" id="newEntryBtn">+ New Entry</button>
+
+        <div class="sidebar-title">Statistics</div>
+        <div class="stats" id="stats">
+          <div class="stat">
+            <span class="stat-label"><span class="stat-dot" style="background:#3b82f6"></span>Total</span>
+            <span class="stat-value" id="totalCount">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label"><span class="stat-dot" style="background:#a855f7"></span>Embedded</span>
+            <span class="stat-value" id="embeddedCount">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unlock Modal -->
+  <div class="modal-overlay" id="unlockModal">
+    <div class="modal">
+      <div class="modal-header" style="flex-direction:column;align-items:flex-start;gap:4px;">
+        <div class="modal-title">🔒 Unlock Dashboard</div>
+        <div class="modal-subtitle">Enter your Dashboard Secret to continue</div>
+      </div>
+      <div id="unlockMessage"></div>
+      <div class="form-group">
+        <label class="form-label">Dashboard Secret</label>
+        <input type="password" id="unlockInput" class="form-input" placeholder="Enter secret…" autofocus>
+      </div>
+      <div class="form-actions">
+        <button id="unlockBtn" class="btn-primary">Unlock</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Card Detail Modal -->
+  <div class="detail-overlay" id="detailModal">
+    <div class="detail-modal">
+      <div class="detail-header">
+        <div class="detail-title" id="detailTitle"></div>
+        <button class="modal-close" id="detailClose">&times;</button>
+      </div>
+      <div id="detailContent"></div>
+    </div>
+  </div>
+
+  <!-- Entry Side Panel (add + edit) -->
+  <div class="sidebar-panel" id="entryPanel">
+    <div class="panel-header">
+      <div class="panel-title" id="panelTitle">New Entry</div>
+      <button class="panel-close" id="panelClose">&times;</button>
+    </div>
+    <div class="panel-content">
+      <form id="entryForm">
+        <input type="hidden" name="entryId">
+        <div id="formMessage"></div>
+
+        <div class="form-group">
+          <label class="form-label">Title *</label>
+          <input type="text" name="title" class="form-input" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Content *</label>
+          <textarea name="content" class="form-textarea" required></textarea>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Category *</label>
+            <select name="category" class="form-select" required>
+              <option value="">Select…</option>
+              <option value="decision">Decision</option>
+              <option value="contact">Contact</option>
+              <option value="lesson">Lesson</option>
+              <option value="open_thread">Open Thread</option>
+              <option value="vendor">Vendor</option>
+              <option value="client">Client</option>
+              <option value="strategy">Strategy</option>
+              <option value="daily_note">Daily Note</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Importance</label>
+            <select name="importance" class="form-select">
+              <option value="3">3 (Default)</option>
+              <option value="1">1 (Low)</option>
+              <option value="2">2</option>
+              <option value="4">4</option>
+              <option value="5">5 (Critical)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Tags (comma-separated)</label>
+          <input type="text" name="tags" class="form-input" placeholder="tag1, tag2">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Source</label>
+          <input type="text" name="source" class="form-input" placeholder="Optional">
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="formSubmitBtn">Create Entry</button>
+          <button type="button" class="btn-secondary" id="panelCancel">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // ── Config ────────────────────────────────────────────────────────────────
+    const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtpaHp3b3pycWNvcWprd3ZveGpnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1Mzk1MDEsImV4cCI6MjA4NzExNTUwMX0.6JYyuKiol8wMuOxw-i0JiDyOm6oZQz2z0hu9SAj8qLU';
+    const GATEWAY_URL = 'https://kihzwozrqcoqjkwvoxjg.supabase.co/functions/v1/gateway';
+
+    const CATEGORY_COLORS = {
+      decision:'#3b82f6', contact:'#22c55e', lesson:'#f59e0b',
+      open_thread:'#ef4444', vendor:'#a855f7', client:'#06b6d4',
+      strategy:'#6366f1', daily_note:'#6b7280'
+    };
+    const CATEGORY_LABELS = {
+      decision:'Decision', contact:'Contact', lesson:'Lesson',
+      open_thread:'Open Thread', vendor:'Vendor', client:'Client',
+      strategy:'Strategy', daily_note:'Daily Note'
+    };
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    let secret = localStorage.getItem('dashboardSecret') || '';
+    let allEntries = [];
+    let currentFilter = { category: 'all', importance: 0 };
+    let currentKeyword = '';
+
+    // ── Gateway helper ────────────────────────────────────────────────────────
+    async function callGateway(action, payload = {}) {
+      const res = await fetch(GATEWAY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${ANON_KEY}`,
+          'X-Dashboard-Secret': secret,
+        },
+        body: JSON.stringify({ action, ...payload }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Unknown error' }));
+        throw Object.assign(new Error(err.error || 'Request failed'), { status: res.status });
+      }
+      return res.json();
+    }
+
+    // ── Unlock flow ───────────────────────────────────────────────────────────
+    function setStatus(unlocked) {
+      const badge = document.getElementById('statusBadge');
+      const text  = document.getElementById('statusText');
+      if (unlocked) {
+        badge.classList.add('unlocked');
+        text.textContent = 'Unlocked';
+      } else {
+        badge.classList.remove('unlocked');
+        text.textContent = 'Locked';
+      }
+    }
+
+    async function tryUnlock(inputSecret) {
+      const prev = secret;
+      secret = inputSecret;
+      try {
+        await callGateway('list');
+        localStorage.setItem('dashboardSecret', secret);
+        setStatus(true);
+        document.getElementById('unlockModal').classList.remove('show');
+        loadEntries();
+      } catch (err) {
+        secret = prev;
+        if (err.status === 401) {
+          showMsg('unlockMessage', 'Incorrect secret — try again.', 'error');
+        } else {
+          showMsg('unlockMessage', 'Connection error. Check console.', 'error');
+        }
+      }
+    }
+
+    document.getElementById('unlockBtn').addEventListener('click', () => {
+      const val = document.getElementById('unlockInput').value.trim();
+      if (val) tryUnlock(val);
+    });
+    document.getElementById('unlockInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') document.getElementById('unlockBtn').click();
+    });
+
+    // ── Load entries ──────────────────────────────────────────────────────────
+    async function loadEntries() {
+      try {
+        allEntries = await callGateway('list');
+        updateStats();
+        applyFilters();
+      } catch (err) {
+        console.error('loadEntries:', err);
+        showEmptyState('Failed to load — check console');
+      }
+    }
+
+    // ── Filters ───────────────────────────────────────────────────────────────
+    function applyFilters() {
+      let out = [...allEntries];
+      if (currentFilter.category !== 'all') out = out.filter(e => e.category === currentFilter.category);
+      if (currentFilter.importance > 0) out = out.filter(e => e.importance >= currentFilter.importance);
+      if (currentKeyword.trim()) {
+        const q = currentKeyword.toLowerCase();
+        out = out.filter(e =>
+          e.title.toLowerCase().includes(q) ||
+          e.content.toLowerCase().includes(q) ||
+          (e.tags || []).some(t => t.toLowerCase().includes(q))
+        );
+      }
+      renderGrid(out);
+    }
+
+    async function semanticSearch() {
+      const query = document.getElementById('keywordSearch').value.trim();
+      if (!query) return;
+      const btn = document.getElementById('semanticSearchBtn');
+      btn.disabled = true;
+      btn.textContent = '…';
+      try {
+        const results = await callGateway('search', { query });
+        renderGrid(results);
+      } catch (err) {
+        console.error('semanticSearch:', err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Semantic';
+      }
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    function renderGrid(entries) {
+      const grid = document.getElementById('cardGrid');
+      if (!entries.length) { showEmptyState('No entries found'); return; }
+
+      grid.innerHTML = entries.map(e => `
+        <div class="card" data-category="${e.category}" data-id="${e.id}">
+          <div class="card-actions">
+            <button class="card-action-btn edit" data-id="${e.id}" title="Edit">✏</button>
+            <button class="card-action-btn delete" data-id="${e.id}" title="Delete">🗑</button>
+          </div>
+          <div class="card-header">
+            <div class="card-title">${esc(e.title)}</div>
+            <div class="card-importance">${'★'.repeat(e.importance)}</div>
+          </div>
+          <div class="card-body">
+            <div class="card-content">${esc(e.content)}</div>
+            <div class="card-meta">
+              <span class="card-category">${CATEGORY_LABELS[e.category] || e.category}</span>
+              <span class="card-time">${fmtTime(e.created_at)}</span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+
+      // Click card body → detail modal (but not action buttons)
+      grid.querySelectorAll('.card').forEach(card => {
+        card.addEventListener('click', (ev) => {
+          if (ev.target.closest('.card-actions, .delete-confirm')) return;
+          showDetail(card.dataset.id);
+        });
+      });
+
+      // Edit buttons
+      grid.querySelectorAll('.card-action-btn.edit').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          openEditPanel(btn.dataset.id);
+        });
+      });
+
+      // Delete buttons — inline confirm
+      grid.querySelectorAll('.card-action-btn.delete').forEach(btn => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          showDeleteConfirm(btn.dataset.id, btn.closest('.card'));
+        });
+      });
+    }
+
+    function showEmptyState(msg) {
+      document.getElementById('cardGrid').innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">◈</div>
+          <div class="empty-text">${esc(msg)}</div>
+        </div>`;
+    }
+
+    function updateStats() {
+      document.getElementById('totalCount').textContent = allEntries.length;
+      document.getElementById('embeddedCount').textContent = allEntries.filter(e => e.embedding !== null).length;
+    }
+
+    // ── Detail modal ──────────────────────────────────────────────────────────
+    function showDetail(id) {
+      const e = allEntries.find(x => x.id === id);
+      if (!e) return;
+      document.getElementById('detailTitle').textContent = e.title;
+      document.getElementById('detailContent').innerHTML = `
+        <div style="color:var(--text-dim);font-size:13px;line-height:1.6;">
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">CATEGORY</div>
+            <span style="padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500;
+              background:${CATEGORY_COLORS[e.category]}18;
+              border:1px solid ${CATEGORY_COLORS[e.category]}44;
+              color:${CATEGORY_COLORS[e.category]};">
+              ${CATEGORY_LABELS[e.category]}
+            </span>
+          </div>
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">IMPORTANCE</div>
+            <span style="color:var(--amber);font-size:16px;">${'★'.repeat(e.importance)}${'☆'.repeat(5-e.importance)}</span>
+          </div>
+          ${e.tags && e.tags.length ? `
+            <div style="margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">TAGS</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                ${e.tags.map(t => `<span style="padding:3px 8px;border-radius:10px;background:var(--surface-hover);font-size:11px;">${esc(t)}</span>`).join('')}
+              </div>
+            </div>` : ''}
+          <div style="margin-bottom:14px;">
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">CONTENT</div>
+            <div style="white-space:pre-wrap;">${esc(e.content)}</div>
+          </div>
+          ${e.source ? `
+            <div style="margin-bottom:14px;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">SOURCE</div>
+              <div>${esc(e.source)}</div>
+            </div>` : ''}
+          <div style="font-size:11px;color:var(--text-muted);padding-top:14px;border-top:1px solid var(--border);">
+            Created ${fmtTime(e.created_at)}
+          </div>
+        </div>`;
+      document.getElementById('detailModal').classList.add('show');
+    }
+
+    document.getElementById('detailClose').addEventListener('click', () =>
+      document.getElementById('detailModal').classList.remove('show'));
+    document.getElementById('detailModal').addEventListener('click', (e) => {
+      if (e.target.id === 'detailModal') document.getElementById('detailModal').classList.remove('show');
+    });
+
+    // ── Inline delete confirm ─────────────────────────────────────────────────
+    function showDeleteConfirm(id, card) {
+      // Replace action buttons with mini-confirm
+      const actions = card.querySelector('.card-actions');
+      actions.style.display = 'none';
+      const confirm = document.createElement('div');
+      confirm.className = 'delete-confirm';
+      confirm.innerHTML = `
+        <span style="font-size:11px;color:var(--text-muted);">Delete?</span>
+        <button class="confirm-yes" title="Yes, delete">✓</button>
+        <button class="confirm-no" title="Cancel">✗</button>`;
+      card.appendChild(confirm);
+
+      confirm.querySelector('.confirm-no').addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        confirm.remove();
+        actions.style.display = '';
+      });
+
+      confirm.querySelector('.confirm-yes').addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        try {
+          await callGateway('delete', { id });
+          allEntries = allEntries.filter(e => e.id !== id);
+          updateStats();
+          applyFilters();
+        } catch (err) {
+          console.error('delete failed:', err);
+          confirm.remove();
+          actions.style.display = '';
+        }
+      });
+    }
+
+    // ── Entry panel (add + edit) ──────────────────────────────────────────────
+    function openAddPanel() {
+      document.getElementById('panelTitle').textContent = 'New Entry';
+      document.getElementById('formSubmitBtn').textContent = 'Create Entry';
+      document.getElementById('entryForm').reset();
+      document.querySelector('input[name="entryId"]').value = '';
+      document.getElementById('formMessage').innerHTML = '';
+      document.getElementById('entryPanel').classList.add('show');
+    }
+
+    function openEditPanel(id) {
+      const e = allEntries.find(x => x.id === id);
+      if (!e) return;
+      document.getElementById('panelTitle').textContent = 'Edit Entry';
+      document.getElementById('formSubmitBtn').textContent = 'Save Changes';
+      document.getElementById('formMessage').innerHTML = '';
+
+      const f = document.getElementById('entryForm');
+      f.querySelector('[name="entryId"]').value = e.id;
+      f.querySelector('[name="title"]').value = e.title;
+      f.querySelector('[name="content"]').value = e.content;
+      f.querySelector('[name="category"]').value = e.category;
+      f.querySelector('[name="importance"]').value = String(e.importance);
+      f.querySelector('[name="tags"]').value = (e.tags || []).join(', ');
+      f.querySelector('[name="source"]').value = e.source || '';
+
+      document.getElementById('entryPanel').classList.add('show');
+    }
+
+    function closePanel() {
+      document.getElementById('entryPanel').classList.remove('show');
+    }
+
+    document.getElementById('newEntryBtn').addEventListener('click', openAddPanel);
+    document.getElementById('panelClose').addEventListener('click', closePanel);
+    document.getElementById('panelCancel').addEventListener('click', closePanel);
+
+    document.getElementById('entryForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const id = fd.get('entryId');
+      const isEdit = !!id;
+      const tags = fd.get('tags').split(',').map(t => t.trim()).filter(Boolean);
+
+      const btn = document.getElementById('formSubmitBtn');
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = isEdit ? 'Saving…' : 'Creating…';
+
+      try {
+        if (isEdit) {
+          const updated = await callGateway('update', {
+            id,
+            title: fd.get('title'),
+            content: fd.get('content'),
+            category: fd.get('category'),
+            importance: parseInt(fd.get('importance')),
+            tags,
+            source: fd.get('source') || null,
+          });
+          // Update in local state
+          const idx = allEntries.findIndex(x => x.id === id);
+          if (idx !== -1) allEntries[idx] = { ...allEntries[idx], ...updated };
+        } else {
+          const created = await callGateway('add', {
+            title: fd.get('title'),
+            content: fd.get('content'),
+            category: fd.get('category'),
+            importance: parseInt(fd.get('importance')),
+            tags,
+            source: fd.get('source') || null,
+          });
+          // Reload to get full entry
+          await loadEntries();
+        }
+        showMsg('formMessage', isEdit ? 'Entry updated!' : 'Entry created!', 'success');
+        setTimeout(closePanel, 1200);
+        updateStats();
+        applyFilters();
+      } catch (err) {
+        showMsg('formMessage', err.message || 'Something went wrong', 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+
+    // ── Filter & search events ────────────────────────────────────────────────
+    document.getElementById('categoryTabs').addEventListener('click', (e) => {
+      if (!e.target.classList.contains('tab')) return;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      e.target.classList.add('active');
+      currentFilter.category = e.target.dataset.category;
+      currentKeyword = '';
+      document.getElementById('keywordSearch').value = '';
+      applyFilters();
+    });
+
+    document.getElementById('importanceFilter').addEventListener('change', (e) => {
+      currentFilter.importance = parseInt(e.target.value);
+      applyFilters();
+    });
+
+    document.getElementById('keywordSearch').addEventListener('input', (e) => {
+      currentKeyword = e.target.value;
+      applyFilters();
+    });
+
+    document.getElementById('keywordSearch').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') semanticSearch();
+    });
+
+    document.getElementById('semanticSearchBtn').addEventListener('click', semanticSearch);
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = str || '';
+      return d.innerHTML;
+    }
+
+    function fmtTime(iso) {
+      const d = new Date(iso), now = new Date();
+      const s = Math.floor((now - d) / 1000);
+      if (s < 60)     return 'just now';
+      if (s < 3600)   return `${Math.floor(s/60)}m ago`;
+      if (s < 86400)  return `${Math.floor(s/3600)}h ago`;
+      if (s < 604800) return `${Math.floor(s/86400)}d ago`;
+      return d.toLocaleDateString();
+    }
+
+    function showMsg(targetId, message, type) {
+      const el = document.getElementById(targetId);
+      if (!el) return;
+      el.innerHTML = `<div class="msg-${type}">${esc(message)}</div>`;
+      if (type === 'success') setTimeout(() => el.innerHTML = '', 3000);
+    }
+
+    // ── Init ──────────────────────────────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      if (secret) {
+        setStatus(true);
+        loadEntries();
+      } else {
+        document.getElementById('unlockModal').classList.add('show');
+      }
+    });
+  </script>
+</body>
+</html>
+```
+
+- [ ] **Step 2: Verify no secrets appear in the file**
+
+```bash
+grep -i "service_role\|DASHBOARD_SECRET" index.html
+```
+
+Expected: no output (the anon key is intentionally present and safe).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add index.html
+git commit -m "feat: gateway-backed dashboard with edit/delete and UI redesign"
+```
+
+---
+
+### Task 5: Push and verify live
+
+- [ ] **Step 1: Push to GitHub**
+
+```bash
+git push origin main
+```
+
+Wait ~30 seconds for GitHub Pages to redeploy.
+
+- [ ] **Step 2: Open the live site and unlock**
+
+Navigate to `https://joselagunasjr-aislowlearner.github.io/rockwell-second-brain/`
+
+Expected:
+- Unlock modal appears
+- Enter your DASHBOARD_SECRET
+- 187 entries load, status badge shows "🔓 Unlocked"
+- Cards show edit ✏ and delete 🗑 on hover
+
+- [ ] **Step 3: Test edit**
+
+Hover a card → click ✏ → edit the title → Save Changes
+Expected: panel closes, card updates in place without full page reload.
+
+- [ ] **Step 4: Test delete**
+
+Hover a card → click 🗑 → click ✓ to confirm
+Expected: card disappears, total count decrements.
+
+- [ ] **Step 5: Test add**
+
+Click "+ New Entry" → fill form → Create Entry
+Expected: success message, panel closes, new card appears.
+
+---
+
+### Task 6: Remove old `add-entry` function
+
+Only run this after Task 5 is fully verified.
+
+- [ ] **Step 1: Delete the old function from Supabase**
+
+```bash
+supabase functions delete add-entry --project-ref kihzwozrqcoqjkwvoxjg
+```
+
+Expected: `Deleted Edge Function add-entry`
+
+- [ ] **Step 2: Delete the local file**
+
+```bash
+rm -rf supabase/functions/add-entry
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add -A
+git commit -m "chore: remove deprecated add-entry Edge Function"
+```
+
+- [ ] **Step 4: Final push**
+
+```bash
+git push origin main
+```
