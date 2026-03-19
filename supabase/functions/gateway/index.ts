@@ -35,8 +35,8 @@ Deno.serve(async (req: Request) => {
   }
 
   // Validate secret — reject before any DB work
-  const secret = req.headers.get("X-Dashboard-Secret");
-  if (!secret || secret !== DASHBOARD_SECRET) {
+  const incoming = req.headers.get("X-Dashboard-Secret");
+  if (!incoming || incoming !== DASHBOARD_SECRET) {
     return json({ error: "Unauthorized" }, 401);
   }
 
