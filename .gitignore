@@ -1,5 +1,10 @@
+# Secrets — never commit
+*.env
 .env
+.env.*
 .env.local
+supabase/.env
+supabase/functions/.env
 *.local
 .DS_Store
 node_modules/
