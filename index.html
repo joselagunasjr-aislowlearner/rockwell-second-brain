@@ -634,7 +634,7 @@
       <div class="sidebar">
         <div class="sidebar-title">Quick Actions</div>
         <button class="new-entry-btn" id="newEntryBtn">+ New Entry</button>
-
+<button class="new-entry-btn" id="exportBtn" style="background:#1e3a5f;margin-top:8px;">⬇ Export JSON</button>
         <div class="sidebar-title">Statistics</div>
         <div class="stats" id="stats">
           <div class="stat">
@@ -1050,6 +1050,28 @@
     }
 
     document.getElementById('newEntryBtn').addEventListener('click', openAddPanel);
+    document.getElementById('exportBtn').addEventListener('click', async () => {
+      const btn = document.getElementById('exportBtn');
+      btn.textContent = '⏳ Exporting...';
+      btn.disabled = true;
+      try {
+        const data = await callGateway('export');
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `rockwell-second-brain-${new Date().toISOString().slice(0,10)}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Export failed: ' + err.message);
+      } finally {
+        btn.textContent = '⬇ Export JSON';
+        btn.disabled = false;
+      }
+    });
     document.getElementById('panelClose').addEventListener('click', closePanel);
     document.getElementById('panelCancel').addEventListener('click', closePanel);
 
