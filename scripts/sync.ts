@@ -45,7 +45,7 @@ const gmailOnly = args.includes('--gmail-only')
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('[sync] Starting Rockwell Second Brain sync...')
+  console.log('[sync] Starting Rockwell Cortex sync...')
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
   const anthropic = new Anthropic({ apiKey: ANTHROPIC_API_KEY })

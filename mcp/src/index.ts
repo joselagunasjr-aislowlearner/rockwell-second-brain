@@ -284,7 +284,7 @@ const TOOL_DEFINITIONS = [
   {
     name: 'search_brain',
     description:
-      'Semantic + keyword hybrid search over the Rockwell Second Brain knowledge base. ' +
+      'Semantic + keyword hybrid search over the Rockwell Cortex knowledge base. ' +
       'Finds entries by meaning, not just exact keywords.',
     inputSchema: {
       type: 'object',
@@ -307,7 +307,7 @@ const TOOL_DEFINITIONS = [
   {
     name: 'add_entry',
     description:
-      'Add a new knowledge entry to the Rockwell Second Brain. ' +
+      'Add a new knowledge entry to Rockwell Cortex. ' +
       'The entry will be automatically embedded within 2 minutes for semantic search.',
     inputSchema: {
       type: 'object',

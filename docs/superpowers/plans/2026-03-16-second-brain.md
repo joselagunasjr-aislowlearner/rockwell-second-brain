@@ -1,4 +1,4 @@
-# Rockwell Second Brain Implementation Plan
+# Rockwell Cortex Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -1000,7 +1000,7 @@ if (res.status === 401) {
 - Updated_at: small secondary text, relative time (e.g. "2 days ago")
 
 **Layout:**
-- Header: "ROCKWELL SECOND BRAIN" left, "+ New Entry" button right
+- Header: "ROCKWELL CORTEX" left, "+ New Entry" button right
 - Search bar row: text input (flex-grow) + "Semantic" button
 - Filter row: category tabs (All + 8 categories) + importance dropdown
 - Card grid: 2 columns on desktop, 1 on mobile (CSS grid, `repeat(auto-fill, minmax(380px, 1fr))`)
@@ -1031,7 +1031,7 @@ This prevents GitHub Pages from processing the site through Jekyll.
 ```bash
 cd /c/Users/josel/rockwell-work/rockwell-second-brain
 git add index.html .nojekyll
-git commit -m "feat: add Second Brain dashboard"
+git commit -m "feat: add Cortex dashboard"
 git push origin main
 ```
 

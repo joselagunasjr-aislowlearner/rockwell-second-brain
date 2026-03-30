@@ -288,7 +288,7 @@ Write the following as the complete `index.html`:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rockwell Second Brain</title>
+  <title>Rockwell Cortex</title>
   <link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
@@ -864,7 +864,7 @@ Write the following as the complete `index.html`:
 <body>
   <div class="app">
     <div class="header">
-      <div class="header-title">Rockwell Second Brain</div>
+      <div class="header-title">Rockwell Cortex</div>
       <div id="statusBadge" class="status-badge">
         <div class="status-dot"></div>
         <span id="statusText">Locked</span>

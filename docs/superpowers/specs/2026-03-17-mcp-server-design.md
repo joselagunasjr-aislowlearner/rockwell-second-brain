@@ -1,4 +1,4 @@
-# Rockwell Second Brain — MCP Server Design Spec
+# Rockwell Cortex — MCP Server Design Spec
 
 **Date:** 2026-03-17
 **Status:** Approved
@@ -8,13 +8,13 @@
 
 ## Overview
 
-A local MCP (Model Context Protocol) server that exposes the Rockwell Second Brain knowledge base to Claude Code and other MCP-compatible AI tools. The server runs as a STDIO process on the developer's machine, authenticates directly with Supabase using a service role key, and provides three tools: semantic search, add entry, and list recent entries.
+A local MCP (Model Context Protocol) server that exposes the Rockwell Cortex knowledge base to Claude Code and other MCP-compatible AI tools. The server runs as a STDIO process on the developer's machine, authenticates directly with Supabase using a service role key, and provides three tools: semantic search, add entry, and list recent entries.
 
 ---
 
 ## Goals
 
-- Give Claude Code persistent read/write access to the Second Brain knowledge base
+- Give Claude Code persistent read/write access to the Cortex knowledge base
 - Load automatically every Claude Code session via `~/.claude/settings.json`
 - Never expose credentials in code or committed files
 - Validate all inputs before touching the database
@@ -101,7 +101,7 @@ All three are required. Server exits on startup if any are missing.
 
 ### `add_entry`
 
-**Purpose:** Add a new knowledge entry to the Second Brain.
+**Purpose:** Add a new knowledge entry to the Cortex.
 
 **Input schema:**
 ```typescript

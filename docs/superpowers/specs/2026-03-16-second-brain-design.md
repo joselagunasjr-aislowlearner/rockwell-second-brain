@@ -1,4 +1,4 @@
-# Rockwell Second Brain — Design Spec
+# Rockwell Cortex — Design Spec
 
 **Date:** 2026-03-16
 **Status:** Approved

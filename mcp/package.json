@@ -1,7 +1,7 @@
 {
   "name": "rockwell-mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for Rockwell Second Brain",
+  "description": "MCP server for Rockwell Cortex",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

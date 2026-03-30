@@ -1,4 +1,4 @@
-# Google Drive + Gmail → Second Brain Sync Script
+# Google Drive + Gmail → Cortex Sync Script
 
 **Date:** 2026-03-17
 **Status:** Approved
@@ -8,7 +8,7 @@
 
 ## Overview
 
-A TypeScript CLI script that pulls business documents from Google Drive and important email threads from Gmail, summarizes them using Claude, and pushes them as knowledge entries into the Rockwell Second Brain (Supabase). Run on demand — never automatic. Designed to be safe, idempotent, and PII-conscious.
+A TypeScript CLI script that pulls business documents from Google Drive and important email threads from Gmail, summarizes them using Claude, and pushes them as knowledge entries into Rockwell Cortex (Supabase). Run on demand — never automatic. Designed to be safe, idempotent, and PII-conscious.
 
 ---
 

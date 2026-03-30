@@ -1,4 +1,4 @@
--- Rockwell Second Brain: Complete database schema migration
+-- Rockwell Cortex: Complete database schema migration
 -- Date: 2026-03-16
 -- Includes: knowledge_entries table, embedding_queue table, indexes, trigger, RPC, and RLS policies
 

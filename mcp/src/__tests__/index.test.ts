@@ -1,5 +1,5 @@
 /**
- * Tests for Rockwell Second Brain MCP server.
+ * Tests for Rockwell Cortex MCP server.
  *
  * Strategy:
  * - Validation functions are exported from index.ts and tested directly (no mocking needed)

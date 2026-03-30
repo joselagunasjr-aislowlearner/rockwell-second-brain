@@ -1,8 +1,8 @@
-# Rockwell Second Brain MCP Server — Implementation Plan
+# Rockwell Cortex MCP Server — Implementation Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a local STDIO MCP server in TypeScript that gives Claude Code read/write access to the Rockwell Second Brain knowledge base via three tools: `search_brain`, `add_entry`, and `list_entries`.
+**Goal:** Build a local STDIO MCP server in TypeScript that gives Claude Code read/write access to the Rockwell Cortex knowledge base via three tools: `search_brain`, `add_entry`, and `list_entries`.
 
 **Architecture:** Single `src/index.ts` file exporting pure validation functions (for testability) and registering three tool handlers with the MCP SDK. Supabase service role key for direct DB access. Google `text-embedding-004` for query embedding in semantic search. Compiled to `dist/index.js`, added to `~/.claude/settings.json`.
 
@@ -48,7 +48,7 @@ Create `C:\Users\josel\rockwell-work\rockwell-second-brain\mcp\package.json`:
 {
   "name": "rockwell-second-brain-mcp",
   "version": "1.0.0",
-  "description": "MCP server for the Rockwell Second Brain knowledge base",
+  "description": "MCP server for the Rockwell Cortex knowledge base",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -171,7 +171,7 @@ Create `C:\Users\josel\rockwell-work\rockwell-second-brain\mcp\src\__tests__\ind
 
 ```typescript
 /**
- * Tests for Rockwell Second Brain MCP server.
+ * Tests for Rockwell Cortex MCP server.
  *
  * Strategy:
  * - Validation functions are exported from index.ts and tested directly (no mocking needed)
@@ -776,7 +776,7 @@ const TOOL_DEFINITIONS = [
   {
     name: 'search_brain',
     description:
-      'Semantic + keyword hybrid search over the Rockwell Second Brain knowledge base. ' +
+      'Semantic + keyword hybrid search over the Rockwell Cortex knowledge base. ' +
       'Finds entries by meaning, not just exact keywords.',
     inputSchema: {
       type: 'object',
@@ -799,7 +799,7 @@ const TOOL_DEFINITIONS = [
   {
     name: 'add_entry',
     description:
-      'Add a new knowledge entry to the Rockwell Second Brain. ' +
+      'Add a new knowledge entry to Rockwell Cortex. ' +
       'The entry will be automatically embedded within 2 minutes for semantic search.',
     inputSchema: {
       type: 'object',
